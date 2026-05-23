@@ -1,47 +1,5 @@
 [
   {
-    "news_id": "1",
-    "csv_order": 1,
-    "title": "比特币突然大幅暴跌，从80000美金一枚跌至10000美金一枚，跌幅超80%",
-    "content": "比特币突然大幅暴跌，从80000美金一枚跌至10000美金一枚，跌幅超80%",
-    "date": "2026/5/20 ",
-    "published_at": "2026/5/20 18:50",
-    "risk_score": 85,
-    "risk_level": "高风险",
-    "risk_type": "异常行情波动风险",
-    "evidence": "比特币价格从80000美金一枚突然暴跌至10000美金一枚，跌幅超过80%。",
-    "summary": "比特币突发性大幅崩盘，跌幅超80%，行情极端异常。",
-    "coins": [
-      "BTC"
-    ],
-    "coin_details": [
-      {
-        "symbol": "BTC",
-        "name": "Bitcoin",
-        "matched_terms": [
-          "LLM"
-        ]
-      }
-    ],
-    "llm_source": "scored_dataset"
-  },
-  {
-    "news_id": "2",
-    "csv_order": 2,
-    "title": "币安交易所突然关闭，所有用户加密货币储值清零",
-    "content": "币安交易所突然关闭，所有用户加密货币储值清零",
-    "date": "2026/5/20 ",
-    "published_at": "2026/5/20 18:50",
-    "risk_score": 95,
-    "risk_level": "高风险",
-    "risk_type": "交易所与系统运维风险",
-    "evidence": "币安交易所突然关闭，所有用户加密货币储值清零",
-    "summary": "币安交易所关闭导致用户资产归零，可能引发大规模挤兑和市场恐慌。",
-    "coins": [],
-    "coin_details": [],
-    "llm_source": "scored_dataset"
-  },
-  {
     "news_id": "3",
     "csv_order": 3,
     "title": "加密项目被黑客攻击导致信任危机，用户从DeFi平台撤资数十亿美元 据Bloomberg报道，一个鲜为人知的加密项...",
@@ -7350,6 +7308,58 @@
         "name": "Tether",
         "matched_terms": [
           "Tether"
+        ]
+      }
+    ],
+    "llm_source": "scored_dataset"
+  },
+  {
+    "news_id": "1",
+    "csv_order": 1,
+    "title": "比特币期权市场本周五将迎来约79亿美元集中到期 比特币期权市场将于本周五迎来约79亿美元规模的集中到期",
+    "content": "比特币期权市场本周五将迎来约79亿美元集中到期 比特币期权市场将于本周五迎来约79亿美元规模的集中到期。据 BlockBeats 报道，其中约3.95亿美元看涨期权集中在7.5万美元执行价附近。\n\n当前资金费率转为负值，反映市场整体偏空布局；若价格持续站稳该关键水平上方，潜在空头挤压风险或将加剧。",
+    "date": "2026-04-20",
+    "published_at": "2026-04-20 18:53:37",
+    "risk_score": 80,
+    "risk_level": "高风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "比特币期权市场本周五将迎来约79亿美元集中到期，其中约3.95亿美元看涨期权集中在7.5万美元执行价。当前资金费率转为负值，市场偏空布局；若价格站稳该关键水平上方，潜在空头挤压风险或将加剧。",
+    "summary": "大规模比特币期权到期，资金费率负值暴露空头集中，若价格突破关键行权价可能引发空头挤压和剧烈波动。",
+    "coins": [
+      "BTC"
+    ],
+    "coin_details": [
+      {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "scored_dataset"
+  },
+  {
+    "news_id": "2",
+    "csv_order": 2,
+    "title": "Bitcoin价格波动引发市场关注 Bitcoin价格经历50%的下滑后部分回升，交易员密切关注拉斯维加斯事件是...",
+    "content": "Bitcoin价格波动引发市场关注 Bitcoin价格经历50%的下滑后部分回升，交易员密切关注拉斯维加斯事件是否标志着Bitcoin的另一个短期高点。据CoinDesk报道，市场对Bitcoin的未来走势充满期待。",
+    "date": "2026-04-20",
+    "published_at": "2026-04-20 18:25:00",
+    "risk_score": 65,
+    "risk_level": "中风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "Bitcoin价格经历50%的下滑后部分回升，交易员密切关注是否标志着另一个短期高点，存在价格再次大幅波动的可能性。",
+    "summary": "比特币出现50%的剧烈波动，市场担忧可能形成短期顶部，存在进一步回调风险。",
+    "coins": [
+      "BTC"
+    ],
+    "coin_details": [
+      {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "matched_terms": [
+          "LLM"
         ]
       }
     ],
