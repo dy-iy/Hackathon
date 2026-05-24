@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crypto Risk Agent"
+  short_description: "Analyze crypto news and coin risk."
+  default_prompt: "Analyze this crypto news for financial risk and summarize the evidence, score, affected assets, and recommended actions."

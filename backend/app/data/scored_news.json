@@ -5725,14 +5725,14 @@
     "content": "Pythnet/Hermes 宕机超 4 小时 据 Foresight News 报道，Pyth 官方状态页显示，Pythnet/Hermes 已宕机逾 4 小时，Price Feeds 与 Sponsored Feeds 均受影响。页面显示已定位问题根因，验证者正在协调重启网络，预计于 20:30 恢复服务。",
     "date": "2026-05-22",
     "published_at": "2026-05-22 19:24:06",
-    "risk_score": 0,
-    "risk_level": "低风险",
-    "risk_type": "异常行情波动风险",
-    "evidence": "",
-    "summary": "",
+    "risk_score": 60,
+    "risk_level": "中风险",
+    "risk_type": "基础设施 / 协议层异常风险",
+    "evidence": "Pythnet/Hermes 宕机已超 4 小时，Price Feeds 与 Sponsored Feeds 均受影响，验证者正在协调重启网络。",
+    "summary": "预言机网络 Pythnet 长时间宕机，影响价格数据推送，可能波及依赖其喂价的 DeFi 协议。",
     "coins": [],
     "coin_details": [],
-    "llm_source": "scored_dataset"
+    "llm_source": "llm"
   },
   {
     "news_id": "521239299e97d3c9",
@@ -24549,31 +24549,22 @@
     "published_at": "2026-05-19 22:39:37",
     "risk_score": 0,
     "risk_level": "低风险",
-    "risk_type": "异常行情波动风险",
-    "evidence": "",
-    "summary": "",
+    "risk_type": "链上漏洞 / 攻击风险",
+    "evidence": "新闻为行业访谈内容，万卉评述DeFi安全事件多为人为失误，但未报道新的实际风险事件；现有风险评分0分合理。",
+    "summary": "行业访谈讨论DeFi风险与稳定币应用，无实际风险事件，维持低风险。",
     "coins": [
-      "BTC",
-      "ETH"
+      "BTC"
     ],
     "coin_details": [
       {
         "symbol": "BTC",
         "name": "Bitcoin",
         "matched_terms": [
-          "BTC",
-          "比特币"
-        ]
-      },
-      {
-        "symbol": "ETH",
-        "name": "Ethereum",
-        "matched_terms": [
-          "ETH"
+          "LLM"
         ]
       }
     ],
-    "llm_source": "scored_dataset"
+    "llm_source": "llm"
   },
   {
     "news_id": "e850134a980c30b7",
@@ -38015,6 +38006,404 @@
     "risk_type": "异常行情波动风险",
     "evidence": "今日恐慌与贪婪指数为42（昨日43），等级为恐慌，反映市场情绪偏空，可能加剧行情波动。",
     "summary": "恐慌指数维持在恐慌区间，市场情绪谨慎，存在短期抛压和波动风险。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "4a6303c2e62cbdd8",
+    "csv_order": 1,
+    "title": "BNB 突破 660 USDT，24 小时涨幅3",
+    "content": "BNB 突破 660 USDT，24 小时涨幅3.11% 据币安行情数据显示，BNB 突破 660 USDT，现报价 660.01001 USDT，24 小时涨幅3.11%。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:27:05",
+    "risk_score": 5,
+    "risk_level": "低风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "BNB突破660 USDT，24小时涨幅3.11%，属于常规价格变动，无异常风险迹象。",
+    "summary": "BNB价格小幅上涨，无显著风险。",
+    "coins": [
+      "BNB"
+    ],
+    "coin_details": [
+      {
+        "symbol": "BNB",
+        "name": "BNB",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "3dadb7715d23e87b",
+    "csv_order": 2,
+    "title": "以太坊多单遭强平，Bitcoin 空单减仓 据 ChainCatcher 报道，链上数据监测显示，Strateg...",
+    "content": "以太坊多单遭强平，Bitcoin 空单减仓 据 ChainCatcher 报道，链上数据监测显示，Strategy 对手盘新开设的以太坊多单于今晨遭全部强平。40 倍杠杆 Bitcoin 空单遭部分强平并减仓，目前仅持有 8.332 枚 BTC，整体仓位已由盈转亏，当前投资回报率为 -73.05%。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:23:34",
+    "risk_score": 85,
+    "risk_level": "高风险",
+    "risk_type": "爆仓 / 清算风险",
+    "evidence": "Strategy 对手盘的以太坊多单全部强平，40倍杠杆比特币空单部分强平后减仓，账户由盈转亏，投资回报率 -73.05%。",
+    "summary": "以太坊多单全平、高杠杆比特币空单强平减仓，揭示严重爆仓风险。",
+    "coins": [
+      "ETH",
+      "BTC"
+    ],
+    "coin_details": [
+      {
+        "symbol": "ETH",
+        "name": "Ethereum",
+        "matched_terms": [
+          "LLM"
+        ]
+      },
+      {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "d655868e772fe2ac",
+    "csv_order": 3,
+    "title": "HYPE 创历史新高，巨鲸浮盈超 3330 万美元 据 ChainCatcher 报道，HYPE 一度突破 63...",
+    "content": "HYPE 创历史新高，巨鲸浮盈超 3330 万美元 据 ChainCatcher 报道，HYPE 一度突破 63 美元，创历史新高。巨鲸地址 “0x082” 做多 HYPE 当前浮盈已超过 3330 万美元。同时，Loracle 的 HYPE 空单目前浮亏已超过 3140 万美元。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:13:46",
+    "risk_score": 45,
+    "risk_level": "中风险",
+    "risk_type": "大额转账 / 巨鲸行为风险",
+    "evidence": "巨鲸地址“0x082”做多HYPE浮盈超3330万美元，Loracle空单浮亏超3140万美元，显示市场杠杆高度集中，可能引发价格剧烈波动或反向清算。",
+    "summary": "HYPE巨鲸多空对垒，浮盈浮亏规模巨大，市场波动风险上升。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "089f7c37007ace0b",
+    "csv_order": 4,
+    "title": "萨尔瓦多增持 8 枚 Bitcoin 据 ChainCatcher 报道，萨尔瓦多财政部网站数据显示，萨尔瓦多在...",
+    "content": "萨尔瓦多增持 8 枚 Bitcoin 据 ChainCatcher 报道，萨尔瓦多财政部网站数据显示，萨尔瓦多在近 7 日内增持了 8 枚 Bitcoin，目前其 Bitcoin 持仓总量达到 7661.37 枚。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:13:40",
+    "risk_score": 5,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "萨尔瓦多继续小幅增持比特币，作为一种主权行为，本身对市场直接冲击有限，但反映了其对加密货币的持续拥抱政策，可能间接影响宏观情绪。",
+    "summary": "萨尔瓦多增持8枚比特币，影响轻微但体现政策延续性",
+    "coins": [
+      "BTC"
+    ],
+    "coin_details": [
+      {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "85523fad05dece6c",
+    "csv_order": 5,
+    "title": "HYPE 24小时内清算总额达1323万美元 据 NS3 报道，Coinglass数据显示，HYPE在过去24小...",
+    "content": "HYPE 24小时内清算总额达1323万美元 据 NS3 报道，Coinglass数据显示，HYPE在过去24小时内的清算总额达到1323万美元。其中，最大单笔清算金额为61.6万美元。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:04:45",
+    "risk_score": 80,
+    "risk_level": "高风险",
+    "risk_type": "爆仓 / 清算风险",
+    "evidence": "据Coinglass数据，HYPE 24小时内清算总额1323万美元，最大单笔清算61.6万美元。",
+    "summary": "HYPE出现大规模清算，总清算金额达1323万美元。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "dbea500580e5c03d",
+    "csv_order": 6,
+    "title": "AI行业首季融资超1100亿元 据NS3AI报道，风险投资机构数据显示，AI行业在第一季度完成了近600笔交易，...",
+    "content": "AI行业首季融资超1100亿元 据NS3AI报道，风险投资机构数据显示，AI行业在第一季度完成了近600笔交易，融资总额超过1100亿元。国内大型模型公司和具身智能公司在5月获得了大额融资。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:04:31",
+    "risk_score": 5,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "该新闻仅报道了AI行业一季度融资总额和交易笔数，未涉及任何加密货币市场、链上漏洞、交易所安全或监管政策等直接风险事件。",
+    "summary": "AI行业融资新闻，对加密货币市场无直接风险影响。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "073ddd5e8fdab851",
+    "csv_order": 7,
+    "title": "国投瑞银白银期货基金溢价明显 据金十数据报道，国投瑞银基金公告称，旗下国投瑞银白银期货证券投资基金（LOF）A类...",
+    "content": "国投瑞银白银期货基金溢价明显 据金十数据报道，国投瑞银基金公告称，旗下国投瑞银白银期货证券投资基金（LOF）A类基金份额二级市场交易价格明显高于基金份额净值，出现较大幅度溢价。2026年5月22日，该基金二级市场收盘价为2.439元，截至5月21日，基金份额净值为2.1015元。若5月25日溢价幅度未有效回落，基金有权采取停牌等措施警示风险。基金主要投资白银期货，提醒投资者关注风险，审慎决策。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 17:04:05",
+    "risk_score": 5,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "新闻为国投瑞银白银期货基金二级市场交易价格出现较大幅度溢价，基金可能采取停牌措施，但属于传统商品期货基金，与加密货币市场无直接关联，对加密资产影响极低。",
+    "summary": "传统白银期货基金溢价公告，与加密市场无关，风险极低。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "54fafc9d913e5ae4",
+    "csv_order": 8,
+    "title": "Team Falcons 胜率大幅波动 据 ChainCatcher 报道，预测市场 Polymarket 上“...",
+    "content": "Team Falcons 胜率大幅波动 据 ChainCatcher 报道，预测市场 Polymarket 上“Counter-Strike：Team Falcons vs Legacy (BO5) - CS Asia Championships Playoffs”事件中，子市场“Match Winner”的“Team Falcons”选项胜率从 88.5% 暴跌至 69.5%。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:53:49",
+    "risk_score": 0,
+    "risk_level": "低风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "新闻内容仅涉及电竞比赛在预测市场Polymarket上的胜率波动，未涉及任何加密货币项目、交易、漏洞或市场风险。",
+    "summary": "电竞预测市场波动，无加密货币相关风险。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "02aae5b0b376e6e3",
+    "csv_order": 9,
+    "title": "HYPE 价格创历史新高，鲸鱼和 Loracle 持仓浮动盈亏显著 Onchain Lens在 X（原Twitt...",
+    "content": "HYPE 价格创历史新高，鲸鱼和 Loracle 持仓浮动盈亏显著 Onchain Lens在 X（原Twitter）表示，$HYPE 创下新高，短暂突破 63 美元。持有 $HYPE (5x) 多头头寸的鲸鱼“0x082”目前浮动盈利超过 3330 万美元。同时，Loracle (@loraclexyz) 的 $HYPE (5x) 空头头寸目前浮动亏损超过 3140 万美元。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:52:48",
+    "risk_score": 82,
+    "risk_level": "高风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "HYPE 价格创历史新高，短暂突破63美元，持有5倍多头头寸的鲸鱼浮动盈利超3330万美元，而Loracle的5倍空头头寸浮动亏损超3140万美元，显示市场多空博弈剧烈，可能引发大规模强平与后续波动。",
+    "summary": "HYPE价格创新高导致5倍多头浮盈与5倍空头浮亏均超3000万美元，杠杆头寸集中，行情异常波动风险极高。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "67b4a2a980179cde",
+    "csv_order": 10,
+    "title": "美国与伊朗或于6月5日举行会谈 据沙特阿拉伯阿拉比亚电视台报道，消息人士透露，美国与伊朗的下一轮会谈可能在 6...",
+    "content": "美国与伊朗或于6月5日举行会谈 据沙特阿拉伯阿拉比亚电视台报道，消息人士透露，美国与伊朗的下一轮会谈可能在 6 月 5 日举行。美国和伊朗将在开始谈判最终协议时派遣各自的首席代表。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:43:46",
+    "risk_score": 15,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "新闻透露美国与伊朗可能于6月5日举行下一轮会谈，此类地缘政治谈判进展可能间接影响全球金融市场情绪，但消息本身未直接触发加密货币市场的剧烈波动。",
+    "summary": "美伊会谈计划可能带来地缘政治情绪变化，但对加密货币市场的直接冲击较小。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "862def133e13adeb",
+    "csv_order": 11,
+    "title": "伊朗与美国谅解备忘录谈判遇阻 伊朗与美国在谅解备忘录草案的两到三个条款上仍存在分歧",
+    "content": "伊朗与美国谅解备忘录谈判遇阻 伊朗与美国在谅解备忘录草案的两到三个条款上仍存在分歧。据 NS3 报道，塔斯尼姆通讯社称，如果美国继续制造障碍，最终的谅解备忘录将无法达成。伊朗少将侯赛因·萨拉米表示，伊朗武装部队保持最高的准备和威慑状态。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:40:47",
+    "risk_score": 75,
+    "risk_level": "中风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "伊朗与美国在谅解备忘录草案上仍存在分歧，伊朗方面警告若美方继续制造障碍，协议将无法达成，且伊朗武装部队保持最高准备和威慑状态，地缘紧张局势可能升级。",
+    "summary": "伊美核谈判遇阻，地缘政治紧张可能冲击全球风险资产。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "38af6dc27bef45ae",
+    "csv_order": 12,
+    "title": "William Mougayar为以太坊基金会辩护 William Mougayar为以太坊基金会在本月出售约2",
+    "content": "William Mougayar为以太坊基金会辩护 William Mougayar为以太坊基金会在本月出售约2.5万枚ETH（价值约4700万美元）进行辩护。据NS3报道，Mougayar表示，ETH、以太坊和以太坊基金会是不同的实体。他指出，基金会通过资助研究、推进协议升级以及减少自身的中心化影响来加强以太坊的发展。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:40:40",
+    "risk_score": 40,
+    "risk_level": "中风险",
+    "risk_type": "大额转账 / 巨鲸行为风险",
+    "evidence": "以太坊基金会本月出售约2.5万枚ETH，价值约4700万美元，属于大额转移，可能引发市场关注或价格波动。",
+    "summary": "以太坊基金会大额出售ETH，虽经辩护，仍具潜在市场影响",
+    "coins": [
+      "ETH"
+    ],
+    "coin_details": [
+      {
+        "symbol": "ETH",
+        "name": "Ethereum",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "c96484148c0f73d6",
+    "csv_order": 13,
+    "title": "以太坊基金会出售2",
+    "content": "以太坊基金会出售2.5万枚ETH 区块链研究员、投资人William Mougayar为Ethereum Foundation辩护称，外界长期以来误解了基金会的定位。据Odaily星球日报报道，Mougayar表示，ETH、以太坊网络以及以太坊基金会是三个不同实体，基金会是负责推动协议发展的非营利组织。近期，以太坊基金会因出售ETH、解除质押以及公开沟通较少而遭受社区批评。数据显示，其本月已向BitMine Immersion Technologies完成第三次OTC出售，共累计出售约2.5万枚ETH。此外，基金会近期还累计解除质押超过3.8万枚ETH。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:33:34",
+    "risk_score": 60,
+    "risk_level": "中风险",
+    "risk_type": "大额转账 / 巨鲸行为风险",
+    "evidence": "以太坊基金会本月累计出售约2.5万枚ETH，并解除质押超过3.8万枚ETH，引发社区批评，可能产生市场抛压。",
+    "summary": "以太坊基金会大量出售ETH可能引发市场波动与社区信任风险。",
+    "coins": [
+      "ETH"
+    ],
+    "coin_details": [
+      {
+        "symbol": "ETH",
+        "name": "Ethereum",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "cfca6dccba5e3629",
+    "csv_order": 14,
+    "title": "地缘政治 | 伊朗否认与美国谅解备忘录内容 据Odaily星球日报报道，伊朗迈赫尔通讯社消息人士否认了美国媒体...",
+    "content": "地缘政治 | 伊朗否认与美国谅解备忘录内容 据Odaily星球日报报道，伊朗迈赫尔通讯社消息人士否认了美国媒体 Axios 关于伊朗与美国拟议谅解备忘录内容的报道，称这些说法仅代表美方的说辞，伊朗方面无法证实。Axios 此前报道称，拟议协议包括将双方停火期限延长 60 天，重新开放霍尔木兹海峡，以及由伊朗清除海峡内的水雷。该消息人士否认了上述报道细节，并拒绝承认这些内容代表了伊朗的立场。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:23:35",
+    "risk_score": 15,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "伊朗方面否认了美国媒体关于双方谅解备忘录的报道，包括停火延期、重新开放霍尔木兹海峡及清除水雷等细节，声明仅代表美方说辞，伊朗无法证实。地缘政治模糊状态可能影响全球市场情绪。",
+    "summary": "伊朗否认与美国达成涉及霍尔木兹海峡的谅解备忘录，缓解了部分地缘担忧，但不确定性仍存。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "6d438cca11766199",
+    "csv_order": 15,
+    "title": "Sahara 将解锁 1300 万枚代币 Sahara 计划解锁 1300 万枚代币，占流通供应量的 4",
+    "content": "Sahara 将解锁 1300 万枚代币 Sahara 计划解锁 1300 万枚代币，占流通供应量的 4.1%，价值约 453 万美元。据 NS3 报道，本周的解锁名单还包括 Humanity 和 Plasma 代币的释放。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:15:23",
+    "risk_score": 60,
+    "risk_level": "中风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "Sahara 计划解锁 1300 万枚代币，占流通供应量的 4.1%，价值约 453 万美元，解锁量较大可能引发短期抛压和价格波动。",
+    "summary": "Sahara 代币解锁 4.1% 流通量，或产生价格下行风险。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "d78a992383187e64",
+    "csv_order": 16,
+    "title": "以太坊交易量创新高，手续费降至历史最低 以太坊网络基本面持续增强",
+    "content": "以太坊交易量创新高，手续费降至历史最低 以太坊网络基本面持续增强。据Odaily星球日报报道，Token Terminal 数据显示，以太坊 L1 交易量已创下历史新高，而链上手续费则降至历史最低水平。Glamsterdam 升级已将交易费用削减约 78%，网络在未流失用户的情况下成功吸收成本下降带来的影响。此外，目前已有 32.4% 的 ETH 处于质押状态，同样创下历史新高，显示市场长期持有与网络安全参与度持续提升。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:13:42",
+    "risk_score": 5,
+    "risk_level": "低风险",
+    "risk_type": "基础设施 / 协议层异常风险",
+    "evidence": "新闻仅报道以太坊网络基本面增强：交易量创历史新高、手续费降至历史最低、Glamsterdam 升级削减费用约 78% 且未流失用户、质押率创新高，无任何风险迹象。",
+    "summary": "以太坊网络性能大幅提升，基本面积极，无明确风险。",
+    "coins": [
+      "ETH"
+    ],
+    "coin_details": [
+      {
+        "symbol": "ETH",
+        "name": "Ethereum",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "33d05c12f314d972",
+    "csv_order": 17,
+    "title": "伊朗谅解备忘录待最高领袖批准 据Odaily星球日报报道，伊朗高级消息人士称，如果伊朗最高国家安全委员会批准该谅...",
+    "content": "伊朗谅解备忘录待最高领袖批准 据Odaily星球日报报道，伊朗高级消息人士称，如果伊朗最高国家安全委员会批准该谅解备忘录，将提交给最高领袖哈梅内伊进行最终批准。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:13:34",
+    "risk_score": 10,
+    "risk_level": "低风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "新闻仅提及伊朗谅解备忘录的审批程序，未涉及任何加密货币相关信息或市场影响。",
+    "summary": "伊朗备忘录审批流程未发现加密相关风险",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "104549dd9febfaeb",
+    "csv_order": 18,
+    "title": "以太坊月度交易笔数创新高 据 Foresight News 报道，Token Terminal 数据显示，以太坊...",
+    "content": "以太坊月度交易笔数创新高 据 Foresight News 报道，Token Terminal 数据显示，以太坊月度交易笔数超过 7000 万笔，创下历史新高。同时，交易费用中位数约为 0.00554 美元，创下历史新低。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:03:34",
+    "risk_score": 10,
+    "risk_level": "低风险",
+    "risk_type": "基础设施 / 协议层异常风险",
+    "evidence": "以太坊月度交易笔数超过7000万笔创历史新高，同时交易费用中位数降至0.00554美元创历史新低，表明网络利用率提高且成本优化，暂无直接风险。",
+    "summary": "以太坊网络交易量创新高而费用创新低，属正面指标，风险极低。",
+    "coins": [
+      "ETH"
+    ],
+    "coin_details": [
+      {
+        "symbol": "ETH",
+        "name": "Ethereum",
+        "matched_terms": [
+          "LLM"
+        ]
+      }
+    ],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "aa96959894b5b60d",
+    "csv_order": 19,
+    "title": "今日恐慌与贪婪指数为39，等级为恐慌 据币安数据显示，今日恐慌与贪婪指数为39（昨日为38），等级为恐慌",
+    "content": "今日恐慌与贪婪指数为39，等级为恐慌 据币安数据显示，今日恐慌与贪婪指数为39（昨日为38），等级为恐慌。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 16:00:15",
+    "risk_score": 25,
+    "risk_level": "低风险",
+    "risk_type": "异常行情波动风险",
+    "evidence": "今日恐慌与贪婪指数为39，处于恐慌区间，表明市场情绪悲观，可能引发短期价格波动。",
+    "summary": "市场恐慌情绪指标显示恐慌，可能预示波动，但非直接风险事件。",
+    "coins": [],
+    "coin_details": [],
+    "llm_source": "llm"
+  },
+  {
+    "news_id": "fac0a2458013bf89",
+    "csv_order": 20,
+    "title": "地缘政治 | 伊朗拒绝交出浓缩铀库存 伊朗高级消息人士表示，伊朗尚未同意交出其高度浓缩铀库存",
+    "content": "地缘政治 | 伊朗拒绝交出浓缩铀库存 伊朗高级消息人士表示，伊朗尚未同意交出其高度浓缩铀库存。据Odaily星球日报报道，伊朗核问题不属于初步协议的一部分。",
+    "date": "2026-05-24",
+    "published_at": "2026-05-24 15:53:33",
+    "risk_score": 65,
+    "risk_level": "中风险",
+    "risk_type": "宏观 / 政策冲击风险",
+    "evidence": "伊朗拒绝交出高度浓缩铀库存，核问题未纳入初步协议，可能加剧地缘政治紧张，引发避险情绪，间接冲击加密货币等风险资产市场。",
+    "summary": "伊朗核问题僵持不下，地缘政治不确定性或对市场情绪产生冲击。",
     "coins": [],
     "coin_details": [],
     "llm_source": "llm"
