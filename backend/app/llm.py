@@ -5,7 +5,12 @@ from pathlib import Path
 from collections.abc import AsyncIterator
 
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+
+try:
+    from openai import AsyncOpenAI, OpenAI
+except ImportError:
+    AsyncOpenAI = None  # type: ignore[assignment]
+    OpenAI = None  # type: ignore[assignment]
 
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -42,6 +47,8 @@ def call_llm_json(prompt: str, temperature: float = 0.2) -> dict[str, object]:
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         return {"_llm_error": "DEEPSEEK_API_KEY is not configured"}
+    if OpenAI is None:
+        return {"_llm_error": "openai package is not installed"}
 
     client = OpenAI(
         api_key=api_key,
@@ -78,6 +85,8 @@ def call_llm_text(
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         return "DEEPSEEK_API_KEY is not configured"
+    if OpenAI is None:
+        return "openai package is not installed"
 
     client = OpenAI(
         api_key=api_key,
@@ -106,6 +115,8 @@ async def call_llm_json_async(prompt: str, temperature: float = 0.2) -> dict[str
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         return {"_llm_error": "DEEPSEEK_API_KEY is not configured"}
+    if AsyncOpenAI is None:
+        return {"_llm_error": "openai package is not installed"}
 
     client = AsyncOpenAI(
         api_key=api_key,
@@ -145,6 +156,9 @@ async def stream_llm_text(
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         yield "DEEPSEEK_API_KEY is not configured"
+        return
+    if AsyncOpenAI is None:
+        yield "openai package is not installed"
         return
 
     client = AsyncOpenAI(

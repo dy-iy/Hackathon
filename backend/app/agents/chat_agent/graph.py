@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 from app.agents.chat_agent.advice_agent import advice_agent
 from app.agents.chat_agent.classify_agent import classify_agent
@@ -13,6 +14,7 @@ from app.agents.chat_agent.risk_explanation_agent import risk_explanation_agent
 from app.agents.chat_agent.risk_triage_agent import risk_triage_agent
 from app.agents.chat_agent.score_agent import score_agent
 from app.agents.chat_agent.uncertainty_agent import uncertainty_agent
+from app.risk_engine import run_v6_risk_engine
 from app.state import CryptoRiskState
 from app.tools.chat_tools import prepare_chat_input
 
@@ -137,9 +139,22 @@ chat_workflow = build_chat_workflow()
 
 
 def run_chat_agent(user_message: str) -> dict:
+    use_v6 = os.getenv("USE_V6_RISK_ENGINE", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if use_v6:
+        try:
+            return run_v6_risk_engine(user_message)
+        except Exception as exc:
+            if os.getenv("V6_RISK_ENGINE_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"}:
+                raise
+            fallback_note = str(exc)
+        else:
+            fallback_note = ""
+    else:
+        fallback_note = ""
+
     initial_state: CryptoRiskState = {
         "original_text": user_message,
-        "raw_agent_outputs": {},
+        "raw_agent_outputs": {"v6_fallback_error": fallback_note} if fallback_note else {},
     }
     result = chat_workflow.invoke(initial_state)
     return result.get("final_report", {})

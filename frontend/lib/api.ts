@@ -27,6 +27,8 @@ export type RiskReport = {
   score_breakdown: ScoreBreakdown;
   impact: string[];
   advice: string[];
+  v6_result?: Record<string, unknown>;
+  debug?: Record<string, unknown>;
 };
 
 export type ChatResponse = {

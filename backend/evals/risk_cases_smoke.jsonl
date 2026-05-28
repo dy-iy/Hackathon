@@ -1,0 +1,24 @@
+{"id":"attack_loss","text":"某 DeFi 协议遭受闪电贷攻击，攻击者利用漏洞盗取约 1200 万美元资产，团队正在追踪攻击者地址。","expected_scenario":"S1_ATTACK_EXPLOIT","expected_min_score":70,"expected_max_score":100,"expected_high_risk":true}
+{"id":"security_research","text":"安全团队发布审计报告，披露某合约存在高危漏洞，但报告称未发现攻击发生，用户资金未受影响，漏洞已修复。","expected_scenario":"S1_ATTACK_EXPLOIT","expected_min_score":0,"expected_max_score":45,"expected_high_risk":false}
+{"id":"exchange_withdrawal","text":"某大型交易所公告称暂停提现，恢复时间未定，社群出现大量无法提款反馈。","expected_scenario":"S2_EXCHANGE_ABNORMALITY","expected_min_score":60,"expected_max_score":90,"expected_high_risk":false}
+{"id":"planned_maintenance","text":"Binance 将进行计划内钱包维护，期间暂停部分网络充值提现，预计 2 小时后恢复，用户资金安全。","expected_scenario":"S2_EXCHANGE_ABNORMALITY","expected_min_score":0,"expected_max_score":45,"expected_high_risk":false}
+{"id":"reg_enforcement","text":"美国 SEC 起诉某加密交易平台并申请冻结相关资产，指控其违反证券法规。","expected_scenario":"S5_REGULATORY_ENFORCEMENT","expected_min_score":60,"expected_max_score":90,"expected_high_risk":true}
+{"id":"reg_discussion","text":"英国央行与监管机构就代币化市场监管框架展开公众咨询，行业可在 7 月前反馈意见。","expected_scenario":"S5_REGULATORY_ENFORCEMENT","expected_min_score":0,"expected_max_score":35,"expected_high_risk":false}
+{"id":"stablecoin_depeg","text":"某稳定币跌破 1 美元并出现脱锚，市场担忧储备不足和赎回压力。","expected_scenario":"S3_STABLECOIN_RESERVE","expected_min_score":60,"expected_max_score":95,"expected_high_risk":true}
+{"id":"stablecoin_discussion","text":"分析师讨论稳定币储备透明度的重要性，未提及脱锚、赎回暂停或储备危机。","expected_scenario":"S3_STABLECOIN_RESERVE","expected_min_score":0,"expected_max_score":45,"expected_high_risk":false}
+{"id":"liquidation_large","text":"BTC 24 小时暴跌 18%，全网合约爆仓金额超过 3 亿美元，市场流动性压力上升。","expected_scenario":"S6_MARKET_LIQUIDATION","expected_min_score":65,"expected_max_score":95,"expected_high_risk":true}
+{"id":"market_commentary","text":"行情日报：ETH 小幅下跌 0.39%，分析师认为若守住支撑位仍有反弹机会。","expected_scenario":"S6_MARKET_LIQUIDATION","expected_min_score":0,"expected_max_score":35,"expected_high_risk":false}
+{"id":"low_risk_product","text":"某钱包上线新的多链资产展示功能，支持用户查看 NFT 和 DeFi 持仓。","expected_scenario":"S0_GENERAL_UNKNOWN","expected_min_score":0,"expected_max_score":25,"expected_high_risk":false}
+{"id":"rumor_withdrawal","text":"社群传闻某交易所无法提现，但官方尚未发布公告，也没有链上储备异常证据。","expected_scenario":"S2_EXCHANGE_ABNORMALITY","expected_min_score":20,"expected_max_score":55,"expected_high_risk":false}
+{"id":"court_positive","text":"法院驳回针对某加密公司的主要指控，监管机构表示将提供更明确的合规指引。","expected_scenario":"S5_REGULATORY_ENFORCEMENT","expected_min_score":0,"expected_max_score":30,"expected_high_risk":false}
+{"id":"resolved_exchange","text":"OKX 钱包维护导致提现短暂延迟，目前服务已恢复正常，公告称用户资金安全。","expected_scenario":"S2_EXCHANGE_ABNORMALITY","expected_min_score":0,"expected_max_score":40,"expected_high_risk":false}
+{"id":"normal_team_change","text":"某项目宣布普通人事调整，市场运营负责人离职，团队称产品路线和资金储备不受影响。","expected_scenario":"S7_FRAUD_GOVERNANCE","expected_min_score":0,"expected_max_score":45,"expected_high_risk":false}
+{"id":"jupiter_phishing_airdrop","text":"诈骗团伙冒充 Jupiter 空投虚假代币，据 ChainCatcher 报道，SolanaFloor 监测到有诈骗团伙冒充 Jupiter，向钱包空投虚假的 CJUP 代币，并诱导用户连接至诈骗网站以窃取资产。","expected_scenario":"S7_FRAUD_GOVERNANCE","expected_min_score":60,"expected_max_score":90,"expected_high_risk":false}
+{"id":"phishing_loss","text":"安全团队提醒，某钓鱼网站诱导用户连接钱包并签名授权，已有多名用户资产被盗，损失约 200 万美元。","expected_scenario":"S7_FRAUD_GOVERNANCE","expected_min_score":70,"expected_max_score":100,"expected_high_risk":true}
+{"id":"rug_pull","text":"某 DeFi 项目疑似 Rug Pull，项目方删除社交媒体账号并移除流动性，团队钱包卷走资金。","expected_scenario":"S7_FRAUD_GOVERNANCE","expected_min_score":76,"expected_max_score":100,"expected_high_risk":true}
+{"id":"ordinary_team_change_v2","text":"项目方宣布组织调整，市场负责人正常离职，官方称资金储备、产品路线和用户服务不受影响。","expected_scenario":"S7_FRAUD_GOVERNANCE","expected_min_score":0,"expected_max_score":35,"expected_high_risk":false}
+{"id":"chain_stopped","text":"Evmos 已通过 Shutdown 提案，将在指定区块高度停止出块和节点运营，目前区块浏览器、官网等均无法访问。","expected_scenario":"S4_INFRASTRUCTURE_FAILURE","expected_min_score":60,"expected_max_score":90,"expected_high_risk":false}
+{"id":"oracle_failure","text":"某 DeFi 协议因预言机异常暂停借贷市场，部分用户交易失败，团队正在修复。","expected_scenario":"S4_INFRASTRUCTURE_FAILURE","expected_min_score":55,"expected_max_score":85,"expected_high_risk":true}
+{"id":"resolved_rpc","text":"某 L2 网络 RPC 故障导致交易短暂失败，目前服务已恢复正常，未发现资金风险。","expected_scenario":"S4_INFRASTRUCTURE_FAILURE","expected_min_score":0,"expected_max_score":45,"expected_high_risk":false}
+{"id":"whale_to_exchange","text":"链上监测显示，一巨鲸地址向 Binance 转入价值 1.2 亿美元 BTC，市场担忧短期抛压。","expected_scenario":"S8_WHALE_ONCHAIN_FLOW","expected_min_score":55,"expected_max_score":85,"expected_high_risk":false}
+{"id":"internal_wallet_transfer","text":"交易所公告称进行冷钱包内部调拨，链上出现大额转账，属于钱包归集，用户资产不受影响。","expected_scenario":"S8_WHALE_ONCHAIN_FLOW","expected_min_score":0,"expected_max_score":30,"expected_high_risk":false}
