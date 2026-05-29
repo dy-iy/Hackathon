@@ -2,7 +2,7 @@
 
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import PortfolioRiskRadar from "@/components/portfolio-risk-radar";
 import SimTradingPanel from "@/components/sim-trading-panel";
 import { AgentProgress, LoadingDots } from "@/components/ui/loading-states";
@@ -201,6 +201,27 @@ const viewRoutes: Record<ActiveView, string> = {
   reports: "/reports",
   settings: "/settings",
 };
+
+function resolveViewFromPathname(pathname: string | null, fallback: ActiveView): ActiveView {
+  if (!pathname || pathname === "/") return "home";
+  if (pathname.startsWith("/analysize") || pathname.startsWith("/analysis")) return "chat";
+  if (pathname.startsWith("/news")) return "news";
+  if (pathname.startsWith("/coins")) return "coin";
+  if (pathname.startsWith("/portfolio")) return "portfolio";
+  if (pathname.startsWith("/sim")) return "sim";
+  if (pathname.startsWith("/reports")) return "reports";
+  if (pathname.startsWith("/settings")) return "settings";
+  return fallback;
+}
+
+function getWindowSearch() {
+  return typeof window === "undefined" ? "" : window.location.search;
+}
+
+function getSearchFromPath(path: string) {
+  const queryStart = path.indexOf("?");
+  return queryStart >= 0 ? path.slice(queryStart) : "";
+}
 
 const analysisRecordsStorageKey = "cryptorisk.analysisRecords";
 const selectedRecordStorageKey = "cryptorisk.selectedRecordId";
@@ -418,7 +439,10 @@ function readCachedCoinItems() {
 
 export default function RiskDashboard({ initialView = "home" }: { initialView?: ActiveView }) {
   const router = useRouter();
-  const [activeView, setActiveView] = useState<ActiveView>(initialView);
+  const pathname = usePathname();
+  const [currentSearch, setCurrentSearch] = useState(() => getWindowSearch());
+  const recordIdFromUrl = useMemo(() => new URLSearchParams(currentSearch).get("record") || "", [currentSearch]);
+  const activeView = resolveViewFromPathname(pathname, initialView);
   const [rankingRange, setRankingRange] = useState<RankingRange>(() => readRankingRange());
   const [overview, setOverview] = useState<RiskOverview | null>(() => readCachedOverview());
   const [newsRanking, setNewsRanking] = useState<NewsRankingItem[]>(() => readCachedNewsItems());
@@ -435,7 +459,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => readStoredChatMessages());
   const [latestReport, setLatestReport] = useState<RiskReport | null>(null);
   const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>(() => readStoredAnalysisRecords());
-  const [selectedRecordId, setSelectedRecordId] = useState(() => readStoredSelectedRecordId());
+  const [storedSelectedRecordId, setStoredSelectedRecordId] = useState(() => readStoredSelectedRecordId());
   const [reportSidebarCollapsed, setReportSidebarCollapsed] = useState(false);
   const [chatLoading, setChatLoading] = useState(() => getActiveAnalysisTaskSnapshot()?.status === "running");
   const [chatError, setChatError] = useState(() => {
@@ -481,14 +505,28 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   }, [rankingRange]);
 
   useEffect(() => {
+    function handlePopState() {
+      setCurrentSearch(getWindowSearch());
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (pathname !== "/reports" || !recordIdFromUrl) return;
+    window.localStorage.setItem(selectedRecordStorageKey, recordIdFromUrl);
+  }, [pathname, recordIdFromUrl]);
+
+  useEffect(() => {
     if (!analysisRecords.length) return;
     window.localStorage.setItem(analysisRecordsStorageKey, JSON.stringify(analysisRecords));
   }, [analysisRecords]);
 
   useEffect(() => {
-    if (!selectedRecordId) return;
-    window.localStorage.setItem(selectedRecordStorageKey, selectedRecordId);
-  }, [selectedRecordId]);
+    if (!storedSelectedRecordId) return;
+    window.localStorage.setItem(selectedRecordStorageKey, storedSelectedRecordId);
+  }, [storedSelectedRecordId]);
 
   useEffect(() => {
     window.localStorage.setItem(chatMessagesStorageKey, JSON.stringify(chatMessages));
@@ -504,7 +542,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
       setAnalysisRecords(records);
 
       if (task?.recordId) {
-        setSelectedRecordId(task.recordId);
+        setStoredSelectedRecordId(task.recordId);
         setLatestReport(records.find((record) => record.id === task.recordId)?.report || null);
         return;
       }
@@ -518,13 +556,40 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   const topNews = displayNews[0] || emptyNewsItem;
   const topCoin = displayCoins[0] || emptyCoinItem;
   const reportRecords = analysisRecords;
-  const selectedRecord = reportRecords.find((record) => record.id === selectedRecordId) || reportRecords[0] || null;
+  const selectedRecordId = recordIdFromUrl || storedSelectedRecordId;
+  const selectedRecord = reportRecords.find((record) => record.id === selectedRecordId)
+    || (!selectedRecordId ? reportRecords[0] || null : null);
 
   const pageMeta = getPageMeta(activeView);
 
   function handleChangeView(view: ActiveView) {
-    setActiveView(view);
-    router.push(viewRoutes[view]);
+    const nextPath = view === "reports" && selectedRecordId
+      ? `/reports?record=${encodeURIComponent(selectedRecordId)}`
+      : viewRoutes[view];
+    navigateTo(nextPath);
+  }
+
+  function handleSelectRecord(id: string) {
+    setStoredSelectedRecordId(id);
+    window.localStorage.setItem(selectedRecordStorageKey, id);
+  }
+
+  function handleSelectReportRecord(id: string) {
+    handleSelectRecord(id);
+    navigateTo(`/reports?record=${encodeURIComponent(id)}`);
+  }
+
+  function navigateTo(nextPath: string, mode: "push" | "replace" = "push") {
+    if (typeof window !== "undefined") {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (currentPath === nextPath) return;
+    }
+    setCurrentSearch(getSearchFromPath(nextPath));
+    if (mode === "replace") {
+      router.replace(nextPath);
+      return;
+    }
+    router.push(nextPath);
   }
 
   function handleChangeRankingRange(range: RankingRange) {
@@ -672,8 +737,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   }
 
   function handleReanalyze(input: string) {
-    setActiveView("chat");
-    window.history.pushState(null, "", viewRoutes.chat);
+    navigateTo(viewRoutes.chat);
     runAnalysis(input);
   }
 
@@ -687,13 +751,18 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
       const nextRecords = items.filter((item) => item.id !== id);
       if (nextRecords.length) {
         window.localStorage.setItem(analysisRecordsStorageKey, JSON.stringify(nextRecords));
-        const nextSelected = nextRecords[0].id;
+        const selectedStillExists = nextRecords.some((record) => record.id === selectedRecordId);
+        const nextSelected = selectedStillExists ? selectedRecordId : nextRecords[0].id;
         window.localStorage.setItem(selectedRecordStorageKey, nextSelected);
-        setSelectedRecordId(nextSelected);
+        setStoredSelectedRecordId(nextSelected);
+        if (activeView === "reports") {
+          navigateTo(`/reports?record=${encodeURIComponent(nextSelected)}`, "replace");
+        }
       } else {
         window.localStorage.removeItem(analysisRecordsStorageKey);
         window.localStorage.removeItem(selectedRecordStorageKey);
-        setSelectedRecordId("");
+        setStoredSelectedRecordId("");
+        if (activeView === "reports") navigateTo("/reports", "replace");
       }
       return nextRecords;
     });
@@ -701,10 +770,11 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
 
   function handleDeleteAllRecords() {
     setAnalysisRecords([]);
-    setSelectedRecordId("");
+    setStoredSelectedRecordId("");
     setLatestReport(null);
     window.localStorage.removeItem(analysisRecordsStorageKey);
     window.localStorage.removeItem(selectedRecordStorageKey);
+    if (activeView === "reports") navigateTo("/reports", "replace");
   }
 
   return (
@@ -750,7 +820,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
                   onClearChatHistory={handleClearChatHistory}
                   onExampleClick={setMessage}
                   onMessageChange={setMessage}
-                  onSelectRecord={setSelectedRecordId}
+                  onSelectRecord={handleSelectRecord}
                   onSubmit={handleChatSubmit}
                   records={analysisRecords}
                 />
@@ -782,7 +852,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
                   onDeleteAllRecords={handleDeleteAllRecords}
                   onDeleteRecord={handleDeleteRecord}
                   onChangeView={handleChangeView}
-                  onSelectRecord={setSelectedRecordId}
+                  onSelectRecord={handleSelectReportRecord}
                   onToggleCollapsed={() => setReportSidebarCollapsed((value) => !value)}
                   onReanalyze={handleReanalyze}
                   records={reportRecords}

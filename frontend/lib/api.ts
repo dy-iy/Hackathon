@@ -387,8 +387,9 @@ export type PortfolioRefreshJob = {
   finished_at: string;
 };
 
-const apiCachePrefix = "cryptorisk.api-cache:";
-const apiCacheTtlMs = 5 * 60 * 1000;
+const legacyApiCachePrefix = "cryptorisk.api-cache:";
+const apiCachePrefix = "cryptorisk.api-cache:v2:";
+const apiCacheTtlMs = 60 * 1000;
 const memoryCache = new Map<string, { expiresAt: number; data: unknown }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
 
@@ -446,7 +447,7 @@ export function clearApiCache() {
   if (typeof window === "undefined") return;
   try {
     Object.keys(window.sessionStorage)
-      .filter((key) => key.startsWith(apiCachePrefix))
+      .filter((key) => key.startsWith(apiCachePrefix) || key.startsWith(legacyApiCachePrefix))
       .forEach((key) => window.sessionStorage.removeItem(key));
   } catch {
     // Ignore storage failures; memory cache has already been cleared.
@@ -454,11 +455,13 @@ export function clearApiCache() {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const { headers, ...restInit } = init || {};
   const response = await fetch(path, {
-    ...init,
+    cache: "no-store",
+    ...restInit,
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers || {}),
+      ...(headers || {}),
     },
   });
 
@@ -508,6 +511,7 @@ export async function streamChatMessage(
 ): Promise<ChatResponse> {
   const response = await fetch("/api/chat/stream", {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
     },
@@ -690,6 +694,7 @@ export async function streamRiskAssistant(
 ) {
   const response = await fetch("/api/risk-assistant/stream", {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
     },
