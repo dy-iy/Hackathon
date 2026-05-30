@@ -1,11 +1,16 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import PortfolioRiskRadar from "@/components/portfolio-risk-radar";
 import SimTradingPanel from "@/components/sim-trading-panel";
 import { AgentProgress, LoadingDots } from "@/components/ui/loading-states";
+import {
+  buildNewsAnalysisInput,
+  clearPendingNewsAnalysisInput,
+  readPendingNewsAnalysisInput,
+} from "@/lib/news-analysis";
 import {
   clearApiCache,
   CoinRankingItem,
@@ -32,9 +37,20 @@ import {
   startNewsUpdateJob,
   streamChatMessage,
   streamRiskAssistant,
+  AuthUser,
+  FavoriteItem,
+  addFavorite,
+  deleteFavorite,
+  fetchCurrentUser,
+  fetchFavorites,
+  fetchPortfolioWatchlist,
+  loginUser,
+  logoutUser,
+  PortfolioWatchlistItem,
+  registerUser,
 } from "@/lib/api";
 
-type ActiveView = "home" | "chat" | "news" | "coin" | "portfolio" | "sim" | "reports" | "settings";
+type ActiveView = "home" | "chat" | "news" | "coin" | "portfolio" | "sim" | "reports" | "favoriteNews" | "favoriteReports" | "my" | "settings";
 type ChatRole = "user" | "assistant";
 
 type ChatMessage = {
@@ -43,11 +59,27 @@ type ChatMessage = {
   content: string;
 };
 
-type NewsFilter = "all" | "top10" | "high" | "medium" | "low";
+type NewsFilter = "all" | "top10" | "high" | "medium" | "low" | "red";
 type NewsSort = "time_desc" | "time_asc" | "score_desc" | "score_asc";
 type CoinFilter = "all" | "top10" | "high" | "medium" | "low";
 type CoinSort = "score_desc" | "score_asc" | "news_desc" | "news_asc";
 type RankingRange = "24h" | "7d";
+type MetricTone = "blue" | "red" | "orange" | "green" | "purple";
+type TrendPoint = {
+  label: string;
+  value: number;
+  timestamp?: number;
+  meta?: Record<string, number | string>;
+};
+type NewsTrendBucket = {
+  avgScore: number;
+  highCount: number;
+  label: string;
+  newsCount: number;
+  redCount: number;
+  timestamp: number;
+};
+type MyVaultTab = "overview" | "assets" | "news" | "reports" | "alerts" | "reviews";
 
 type AnalysisRecord = {
   id: string;
@@ -199,6 +231,9 @@ const viewRoutes: Record<ActiveView, string> = {
   portfolio: "/portfolio",
   sim: "/sim",
   reports: "/reports",
+  favoriteNews: "/favorites/news",
+  favoriteReports: "/favorites/reports",
+  my: "/my",
   settings: "/settings",
 };
 
@@ -210,6 +245,9 @@ function resolveViewFromPathname(pathname: string | null, fallback: ActiveView):
   if (pathname.startsWith("/portfolio")) return "portfolio";
   if (pathname.startsWith("/sim")) return "sim";
   if (pathname.startsWith("/reports")) return "reports";
+  if (pathname.startsWith("/favorites/news")) return "favoriteNews";
+  if (pathname.startsWith("/favorites/reports")) return "favoriteReports";
+  if (pathname.startsWith("/my")) return "my";
   if (pathname.startsWith("/settings")) return "settings";
   return fallback;
 }
@@ -228,6 +266,8 @@ const selectedRecordStorageKey = "cryptorisk.selectedRecordId";
 const chatMessagesStorageKey = "cryptorisk.chatMessages";
 const activeAnalysisTaskStorageKey = "cryptorisk.activeAnalysisTask";
 const newsUpdateJobStorageKey = "cryptorisk.newsUpdateJobId";
+const authUsernameStorageKey = "cryptorisk.auth.username";
+const reportCreatedEventName = "cryptorisk:analysis-record-created";
 
 const initialChatProgressStage: ChatProgressStage = "input_standardization";
 
@@ -280,6 +320,19 @@ function writeStoredAnalysisRecords(records: AnalysisRecord[]) {
     window.localStorage.setItem(analysisRecordsStorageKey, JSON.stringify(records));
   } else {
     window.localStorage.removeItem(analysisRecordsStorageKey);
+  }
+}
+
+function readStoredAuthUsername() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(authUsernameStorageKey) || "";
+}
+
+function writeStoredAuthUsername(username: string) {
+  if (typeof window === "undefined") return;
+  const normalized = username.trim().toLowerCase();
+  if (normalized) {
+    window.localStorage.setItem(authUsernameStorageKey, normalized);
   }
 }
 
@@ -460,6 +513,15 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   const [latestReport, setLatestReport] = useState<RiskReport | null>(null);
   const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>(() => readStoredAnalysisRecords());
   const [storedSelectedRecordId, setStoredSelectedRecordId] = useState(() => readStoredSelectedRecordId());
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [favoriteReportIds, setFavoriteReportIds] = useState<Set<string>>(() => new Set());
+  const [favoriteNewsIds, setFavoriteNewsIds] = useState<Set<string>>(() => new Set());
+  const [favoriteReports, setFavoriteReports] = useState<FavoriteItem[]>([]);
+  const [favoriteNews, setFavoriteNews] = useState<FavoriteItem[]>([]);
+  const [favoriteActionLoadingId, setFavoriteActionLoadingId] = useState("");
   const [reportSidebarCollapsed, setReportSidebarCollapsed] = useState(false);
   const [chatLoading, setChatLoading] = useState(() => getActiveAnalysisTaskSnapshot()?.status === "running");
   const [chatError, setChatError] = useState(() => {
@@ -467,6 +529,7 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
     return task?.status === "error" ? `分析失败：${task.error || "请求后端失败"}` : "";
   });
   const [chatProgressStage, setChatProgressStage] = useState<ChatProgressStage>(() => getActiveAnalysisTaskSnapshot()?.stage || initialChatProgressStage);
+  const pendingNewsAnalysisIdRef = useRef("");
 
   useEffect(() => {
     let ignore = false;
@@ -514,6 +577,76 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
   }, []);
 
   useEffect(() => {
+    function handleReportCreated(event: Event) {
+      const detail = (event as CustomEvent<{ recordId?: string }>).detail;
+      const records = readStoredAnalysisRecords();
+      const recordId = detail?.recordId || records[0]?.id || "";
+      setAnalysisRecords(records);
+      if (!recordId) return;
+      setStoredSelectedRecordId(recordId);
+      setLatestReport(records.find((record) => record.id === recordId)?.report || records[0]?.report || null);
+      if (pathname === "/reports") {
+        setCurrentSearch(`?record=${encodeURIComponent(recordId)}`);
+      }
+    }
+
+    window.addEventListener(reportCreatedEventName, handleReportCreated);
+    return () => window.removeEventListener(reportCreatedEventName, handleReportCreated);
+  }, [pathname]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadCurrentUser() {
+      try {
+        const user = await fetchCurrentUser();
+        if (!ignore) setAuthUser(user);
+      } catch (error) {
+        console.error(error);
+        if (!ignore) setAuthUser(null);
+      }
+    }
+
+    void loadCurrentUser();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!authUser) return;
+
+    async function loadFavoriteReports() {
+      try {
+        const [reportFavorites, newsFavorites] = await Promise.all([
+          fetchFavorites("report"),
+          fetchFavorites("news"),
+        ]);
+        if (!ignore) {
+          setFavoriteReports(reportFavorites);
+          setFavoriteNews(newsFavorites);
+          setFavoriteReportIds(new Set(reportFavorites.map((item) => item.item_id)));
+          setFavoriteNewsIds(new Set(newsFavorites.map((item) => item.item_id)));
+        }
+      } catch (error) {
+        console.error(error);
+        if (!ignore) {
+          setFavoriteReports([]);
+          setFavoriteNews([]);
+          setFavoriteReportIds(new Set());
+          setFavoriteNewsIds(new Set());
+        }
+      }
+    }
+
+    void loadFavoriteReports();
+    return () => {
+      ignore = true;
+    };
+  }, [authUser]);
+
+  useEffect(() => {
     if (pathname !== "/reports" || !recordIdFromUrl) return;
     window.localStorage.setItem(selectedRecordStorageKey, recordIdFromUrl);
   }, [pathname, recordIdFromUrl]);
@@ -550,6 +683,20 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
       setLatestReport(records[0]?.report || null);
     });
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "chat" || chatLoading) return;
+    const pending = readPendingNewsAnalysisInput();
+    if (!pending || pending.id === pendingNewsAnalysisIdRef.current) return;
+    pendingNewsAnalysisIdRef.current = pending.id;
+    setMessage(pending.input);
+    const timer = window.setTimeout(() => {
+      if (getActiveAnalysisTaskSnapshot()?.status === "running") return;
+      clearPendingNewsAnalysisInput();
+      runAnalysis(pending.input);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeView, chatLoading]);
 
   const displayNews = newsRanking;
   const displayCoins = coinRanking;
@@ -741,9 +888,166 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
     runAnalysis(input);
   }
 
+  function handleDeepAnalyzeNews(item: NewsRankingItem) {
+    const input = buildNewsAnalysisInput(item);
+    window.dispatchEvent(new CustomEvent("cryptorisk:open-risk-assistant", {
+      detail: {
+        mode: "deep_analysis",
+        selectedText: item.content || item.summary || item.title,
+        sourceInput: input,
+        news: item,
+      },
+    }));
+  }
+
+  function handleDeepAnalyzeNewsInput(input: string) {
+    window.dispatchEvent(new CustomEvent("cryptorisk:open-risk-assistant", {
+      detail: {
+        mode: "deep_analysis",
+        selectedText: input,
+        sourceInput: input,
+      },
+    }));
+  }
+
   function handleClearChatHistory() {
     setChatMessages(initialChatMessages);
     window.localStorage.setItem(chatMessagesStorageKey, JSON.stringify(initialChatMessages));
+  }
+
+  async function handleAuthSubmit(mode: "login" | "register", username: string, password: string) {
+    if (authLoading) return;
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      const response = mode === "login"
+        ? await loginUser(username, password)
+        : await registerUser(username, password);
+      writeStoredAuthUsername(response.user.username);
+      setAuthUser(response.user);
+      setAuthModalOpen(false);
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message.replace(/^Request failed: \d+:\s*/, "") : "登录失败，请稍后重试";
+      setAuthError(mode === "register" && message.includes("用户名已存在") ? "用户名已存在，请切换到登录，不需要重新注册。" : message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (authLoading) return;
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      await logoutUser();
+      setAuthUser(null);
+      setFavoriteReports([]);
+      setFavoriteNews([]);
+      setFavoriteReportIds(new Set());
+      setFavoriteNewsIds(new Set());
+    } catch (error) {
+      console.error(error);
+      setAuthError("退出登录失败，请稍后重试");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleToggleReportFavorite(record: AnalysisRecord) {
+    if (!authUser) {
+      setAuthError("请先登录后再收藏报告");
+      setAuthModalOpen(true);
+      return;
+    }
+    if (favoriteActionLoadingId) return;
+
+    const isFavorite = favoriteReportIds.has(record.id);
+    setFavoriteActionLoadingId(record.id);
+    setAuthError("");
+    try {
+      if (isFavorite) {
+        await deleteFavorite("report", record.id);
+        setFavoriteReports((items) => items.filter((item) => item.item_id !== record.id));
+        setFavoriteReportIds((ids) => {
+          const next = new Set(ids);
+          next.delete(record.id);
+          return next;
+        });
+      } else {
+        const favorite = await addFavorite({
+          item_type: "report",
+          item_id: record.id,
+          title: record.title,
+          payload: {
+            id: record.id,
+            title: record.title,
+            createdAt: record.createdAt,
+            input: record.input,
+            report: record.report,
+          },
+        });
+        setFavoriteReports((items) => [favorite, ...items.filter((item) => item.item_id !== favorite.item_id)]);
+        setFavoriteReportIds((ids) => new Set(ids).add(record.id));
+      }
+    } catch (error) {
+      console.error(error);
+      setAuthError(error instanceof Error ? error.message.replace(/^Request failed: \d+:\s*/, "") : "收藏报告失败");
+      if (!authUser) setAuthModalOpen(true);
+    } finally {
+      setFavoriteActionLoadingId("");
+    }
+  }
+
+  async function handleToggleNewsFavorite(item: NewsRankingItem) {
+    if (!authUser) {
+      setAuthError("请先登录后再收藏新闻");
+      setAuthModalOpen(true);
+      return;
+    }
+
+    const itemId = String(item.news_id);
+    if (favoriteActionLoadingId) return;
+    const isFavorite = favoriteNewsIds.has(itemId);
+    setFavoriteActionLoadingId(`news:${itemId}`);
+    setAuthError("");
+    try {
+      if (isFavorite) {
+        await deleteFavorite("news", itemId);
+        setFavoriteNews((items) => items.filter((favorite) => favorite.item_id !== itemId));
+        setFavoriteNewsIds((ids) => {
+          const next = new Set(ids);
+          next.delete(itemId);
+          return next;
+        });
+      } else {
+        const favorite = await addFavorite({
+          item_type: "news",
+          item_id: itemId,
+          title: item.title,
+          payload: {
+            news_id: item.news_id,
+            title: item.title,
+            content: item.content,
+            published_at: item.published_at || item.date,
+            risk_score: item.risk_score,
+            risk_level: item.risk_level,
+            risk_type: item.risk_type,
+            coins: item.coins,
+            summary: item.summary,
+            evidence: item.evidence,
+            source_url: item.source_url,
+          },
+        });
+        setFavoriteNews((items) => [favorite, ...items.filter((existing) => existing.item_id !== favorite.item_id)]);
+        setFavoriteNewsIds((ids) => new Set(ids).add(itemId));
+      }
+    } catch (error) {
+      console.error(error);
+      setAuthError(error instanceof Error ? error.message.replace(/^Request failed: \d+:\s*/, "") : "收藏新闻失败");
+    } finally {
+      setFavoriteActionLoadingId("");
+    }
   }
 
   function handleDeleteRecord(id: string) {
@@ -783,14 +1087,24 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
         <Sidebar activeView={activeView} onChangeView={handleChangeView} />
 
         <div className="min-w-0 flex-1 lg:pl-[248px]">
-          <TopBar title={pageMeta.title} subtitle={pageMeta.subtitle} />
+          <TopBar
+            authLoading={authLoading}
+            authUser={authUser}
+            onLoginClick={() => {
+              setAuthError("");
+              setAuthModalOpen(true);
+            }}
+            onLogout={handleLogout}
+            title={pageMeta.title}
+            subtitle={pageMeta.subtitle}
+          />
           <MobileNav activeView={activeView} onChangeView={handleChangeView} />
 
           <div className="px-3 py-4 sm:px-6 sm:py-5 2xl:px-8">
             <div className="min-w-0 space-y-5">
               {rankingError && <Notice tone="amber" text={rankingError} />}
 
-              {activeView !== "chat" && activeView !== "portfolio" && activeView !== "sim" && activeView !== "reports" && activeView !== "settings" && (
+              {activeView !== "chat" && activeView !== "portfolio" && activeView !== "sim" && activeView !== "reports" && activeView !== "favoriteNews" && activeView !== "favoriteReports" && activeView !== "my" && activeView !== "settings" && (
                 <MetricGrid
                   activeView={activeView}
                   coinItems={displayCoins}
@@ -805,8 +1119,12 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
               {activeView === "home" && (
                 <DashboardHome
                   coinItems={displayCoins}
+                  favoriteActionLoadingId={favoriteActionLoadingId}
+                  favoriteNewsIds={favoriteNewsIds}
                   newsItems={displayNews}
+                  onAnalyzeNews={handleDeepAnalyzeNews}
                   onChangeView={handleChangeView}
+                  onToggleNewsFavorite={handleToggleNewsFavorite}
                 />
               )}
 
@@ -829,8 +1147,12 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
               {activeView === "news" && (
                 <NewsView
                   items={displayNews}
+                  favoriteActionLoadingId={favoriteActionLoadingId}
+                  favoriteNewsIds={favoriteNewsIds}
                   range={rankingRange}
+                  onAnalyzeNews={handleDeepAnalyzeNews}
                   onChangeRange={handleChangeRankingRange}
+                  onToggleNewsFavorite={handleToggleNewsFavorite}
                 />
               )}
               {activeView === "coin" && (
@@ -853,10 +1175,48 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
                   onDeleteRecord={handleDeleteRecord}
                   onChangeView={handleChangeView}
                   onSelectRecord={handleSelectReportRecord}
+                  favoriteReportIds={favoriteReportIds}
+                  favoriteActionLoadingId={favoriteActionLoadingId}
                   onToggleCollapsed={() => setReportSidebarCollapsed((value) => !value)}
+                  onToggleFavorite={handleToggleReportFavorite}
                   onReanalyze={handleReanalyze}
                   records={reportRecords}
                   selectedRecord={selectedRecord}
+                />
+              )}
+              {activeView === "favoriteNews" && (
+                <FavoriteNewsView
+                  favorites={favoriteNews}
+                  onAnalyzeNewsInput={handleDeepAnalyzeNewsInput}
+                  onChangeView={handleChangeView}
+                  onLoginClick={() => {
+                    setAuthError("");
+                    setAuthModalOpen(true);
+                  }}
+                  user={authUser}
+                />
+              )}
+              {activeView === "favoriteReports" && (
+                <FavoriteReportsView
+                  favorites={favoriteReports}
+                  onChangeView={handleChangeView}
+                  onLoginClick={() => {
+                    setAuthError("");
+                    setAuthModalOpen(true);
+                  }}
+                  user={authUser}
+                />
+              )}
+              {activeView === "my" && (
+                <MyView
+                  favoriteNews={favoriteNews}
+                  favoriteReports={favoriteReports}
+                  onChangeView={handleChangeView}
+                  onLoginClick={() => {
+                    setAuthError("");
+                    setAuthModalOpen(true);
+                  }}
+                  user={authUser}
                 />
               )}
               {activeView === "settings" && (
@@ -877,6 +1237,16 @@ export default function RiskDashboard({ initialView = "home" }: { initialView?: 
           </footer>
         </div>
       </div>
+      {authModalOpen && (
+        <AuthModal
+          error={authError}
+          loading={authLoading}
+          onClose={() => {
+            if (!authLoading) setAuthModalOpen(false);
+          }}
+          onSubmit={handleAuthSubmit}
+        />
+      )}
     </main>
   );
 }
@@ -897,6 +1267,7 @@ function Sidebar({
     { key: "portfolio", label: "我的风险资产", icon: <PortfolioIcon /> },
     { key: "sim", label: "模拟交易盘", icon: <TradeIcon /> },
     { key: "reports", label: "分析报告", icon: <FileIcon /> },
+    { key: "my", label: "我的", icon: <UserIcon /> },
     { key: "settings", label: "系统设置", icon: <GearIcon /> },
   ];
 
@@ -916,7 +1287,7 @@ function Sidebar({
         {navItems.slice(0, 4).map((item) => (
           <SidebarButton
             key={item.key}
-            active={activeView === item.key}
+            active={isSidebarItemActive(activeView, item.key)}
             icon={item.icon}
             label={item.label}
             onClick={() => onChangeView(item.key)}
@@ -956,7 +1327,7 @@ function Sidebar({
         {navItems.slice(4).map((item) => (
           <SidebarButton
             key={item.key}
-            active={activeView === item.key}
+            active={isSidebarItemActive(activeView, item.key)}
             icon={item.icon}
             label={item.label}
             onClick={() => onChangeView(item.key)}
@@ -1011,6 +1382,10 @@ function SidebarButton({
   );
 }
 
+function isSidebarItemActive(activeView: ActiveView, itemKey: ActiveView) {
+  return activeView === itemKey || (itemKey === "my" && (activeView === "favoriteNews" || activeView === "favoriteReports"));
+}
+
 function SidebarSubButton({
   active,
   label,
@@ -1033,7 +1408,21 @@ function SidebarSubButton({
   );
 }
 
-function TopBar({ title, subtitle }: { title: string; subtitle: string }) {
+function TopBar({
+  authLoading,
+  authUser,
+  onLoginClick,
+  onLogout,
+  title,
+  subtitle,
+}: {
+  authLoading: boolean;
+  authUser: AuthUser | null;
+  onLoginClick: () => void;
+  onLogout: () => void;
+  title: string;
+  subtitle: string;
+}) {
   return (
     <header className="risk-topbar sticky top-0 z-20 border-b border-blue-100 backdrop-blur-xl">
       <div className="flex min-h-[76px] items-center gap-4 px-4 sm:min-h-[92px] sm:px-6 2xl:px-8">
@@ -1041,9 +1430,233 @@ function TopBar({ title, subtitle }: { title: string; subtitle: string }) {
           <p className="truncate text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">{title}</p>
           <p className="mt-1 line-clamp-2 text-sm text-slate-500">{subtitle}</p>
         </div>
+        <div className="shrink-0">
+          {authUser ? (
+            <div className="flex items-center gap-2">
+              <div className="hidden min-w-0 text-right sm:block">
+                <p className="truncate text-sm font-bold text-slate-900">{authUser.display_name || authUser.username}</p>
+                <p className="text-xs font-semibold text-emerald-600">已登录</p>
+              </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                disabled={authLoading}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm transition-colors duration-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
+              >
+                <UsersIcon />
+                <span className="hidden sm:inline">退出</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onLoginClick}
+              disabled={authLoading}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white shadow-sm shadow-blue-200 transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
+            >
+              <UsersIcon />
+              登录
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );
+}
+
+function AuthModal({
+  error,
+  loading,
+  onClose,
+  onSubmit,
+}: {
+  error: string;
+  loading: boolean;
+  onClose: () => void;
+  onSubmit: (mode: "login" | "register", username: string, password: string) => void;
+}) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState(() => readStoredAuthUsername());
+  const [password, setPassword] = useState("");
+  const passwordStrength = getPasswordStrength(password, username);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit(mode, username.trim(), password);
+  }
+
+  function handleGeneratePassword() {
+    const generated = generateStrongPassword();
+    setPassword(generated);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-blue-100 bg-white shadow-2xl shadow-slate-900/20">
+        <div className="flex items-center justify-between gap-3 border-b border-blue-100 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
+              <UsersIcon />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">{mode === "login" ? "用户登录" : "注册账号"}</h2>
+              <p className="text-xs font-semibold text-slate-500">CryptoRisk Agent</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-100 bg-white text-slate-500 transition-colors duration-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="关闭登录窗口"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+          <div className="grid grid-cols-2 rounded-lg border border-blue-100 bg-slate-50 p-1">
+            {[
+              ["login", "登录"],
+              ["register", "注册"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMode(value as "login" | "register")}
+                className={`h-9 rounded-md text-sm font-bold transition-colors duration-200 ${
+                  mode === value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-blue-700"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <label className="block">
+            <span className="text-sm font-bold text-slate-700">用户名</span>
+            <input
+              value={username}
+              onChange={(event) => {
+                setUsername(event.target.value);
+                writeStoredAuthUsername(event.target.value);
+              }}
+              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              autoComplete="username"
+              minLength={3}
+              maxLength={32}
+              required
+            />
+          </label>
+
+          <label className="block">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-bold text-slate-700">密码</span>
+              {mode === "register" && (
+                <button
+                  type="button"
+                  onClick={handleGeneratePassword}
+                  className="text-xs font-bold text-blue-700 transition-colors duration-200 hover:text-blue-900"
+                >
+                  生成强密码
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex overflow-hidden rounded-lg border border-blue-100 bg-white focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100">
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-11 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400"
+                placeholder={mode === "login" ? "输入密码" : "至少 10 位，建议使用强密码"}
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                minLength={mode === "login" ? 6 : 10}
+                maxLength={128}
+                required
+              />
+            </div>
+          </label>
+
+          {mode === "register" && (
+            <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-bold text-slate-600">密码强度</span>
+                <span className={`text-xs font-bold ${passwordStrength.color}`}>{passwordStrength.label}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                <div className={`h-full rounded-full ${passwordStrength.bar}`} style={{ width: `${passwordStrength.percent}%` }} />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || username.trim().length < 3 || password.length < (mode === "login" ? 6 : 10)}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-200 transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? (mode === "login" ? "正在登录..." : "正在注册...") : mode === "login" ? "登录" : "注册并登录"}
+          </button>
+          {mode === "register" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("login");
+                setPassword("");
+              }}
+              className="w-full text-center text-xs font-bold text-slate-500 transition-colors duration-200 hover:text-blue-700"
+            >
+              已有账号？切换到登录
+            </button>
+          )}
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function generateStrongPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*_-+=";
+  const required = ["A", "z", "7", "!"];
+  const bytes = new Uint32Array(18);
+  if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    bytes.forEach((_, index) => {
+      bytes[index] = Math.floor(Math.random() * chars.length);
+    });
+  }
+  return [...required, ...Array.from(bytes, (value) => chars[value % chars.length])]
+    .sort(() => Math.random() - 0.5)
+    .join("");
+}
+
+function getPasswordStrength(password: string, username: string) {
+  if (!password) {
+    return { label: "待输入", percent: 8, color: "text-slate-400", bar: "bg-slate-200" };
+  }
+
+  const lowered = password.toLowerCase();
+  const normalizedUsername = username.trim().toLowerCase();
+  let score = 0;
+  if (password.length >= 10) score += 25;
+  if (password.length >= 14) score += 20;
+  if (/[a-z]/.test(password)) score += 12;
+  if (/[A-Z]/.test(password)) score += 12;
+  if (/\d/.test(password)) score += 12;
+  if (/[^A-Za-z0-9]/.test(password)) score += 19;
+  if (normalizedUsername && lowered.includes(normalizedUsername)) score -= 30;
+  if (/^(.)\1+$/.test(password) || /123456|password|qwerty|admin/i.test(password)) score -= 35;
+
+  const clamped = Math.max(8, Math.min(100, score));
+  if (clamped >= 80) return { label: "强", percent: clamped, color: "text-emerald-600", bar: "bg-emerald-500" };
+  if (clamped >= 55) return { label: "中", percent: clamped, color: "text-amber-600", bar: "bg-amber-500" };
+  return { label: "偏弱", percent: clamped, color: "text-rose-600", bar: "bg-rose-500" };
 }
 
 function MobileNav({
@@ -1061,6 +1674,7 @@ function MobileNav({
     ["portfolio", "资产"],
     ["sim", "模拟盘"],
     ["reports", "报告"],
+    ["my", "我的"],
     ["settings", "设置"],
   ];
 
@@ -1072,7 +1686,7 @@ function MobileNav({
           type="button"
           onClick={() => onChangeView(key)}
           className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-colors duration-200 sm:px-4 ${
-            activeView === key
+            isSidebarItemActive(activeView, key)
               ? "bg-blue-600 text-white"
               : "border border-blue-100 bg-white text-slate-600"
           }`}
@@ -1113,17 +1727,23 @@ function MetricGrid({
 }
 
 function MetricCard({
+  deltaPercent,
   icon,
   label,
+  series,
   value,
   delta,
+  deltaTone = "neutral",
   tone,
 }: {
+  deltaPercent?: string;
   icon: ReactNode;
   label: string;
+  series?: TrendPoint[];
   value: string;
   delta: string;
-  tone: "blue" | "red" | "orange" | "green" | "purple";
+  deltaTone?: "up" | "down" | "neutral";
+  tone: MetricTone;
 }) {
   const toneStyle = {
     blue: "bg-blue-50 text-blue-600",
@@ -1137,12 +1757,21 @@ function MetricCard({
     <article className="risk-card rounded-lg p-5">
       <div className="flex items-start justify-between gap-4">
         <div className={`flex h-14 w-14 items-center justify-center rounded-full ${toneStyle}`}>{icon}</div>
-        <Sparkline tone={tone} />
+        <SparklineChart
+          ariaLabel={`${label}最近趋势`}
+          className="mt-7 h-9 w-24"
+          series={series || buildFallbackTrendSeries(clampScore(Number(value) || 0 || 40))}
+          tone={tone}
+        />
       </div>
       <div className="mt-3">
         <p className="text-sm font-semibold text-slate-600">{label}</p>
         <p className={`mt-1 text-3xl font-bold ${toneStyle.split(" ")[1]}`}>{value}</p>
-        <p className="mt-2 text-xs text-slate-500">较昨日 <span className="font-semibold text-emerald-600">{delta}</span></p>
+        <p className="mt-2 text-xs text-slate-500">
+          较昨日{" "}
+          <span className={`font-semibold ${deltaTextClass(deltaTone)}`}>{delta}</span>
+          {deltaPercent && <span className={`ml-1 font-semibold ${deltaTextClass(deltaTone)}`}>{deltaPercent}</span>}
+        </p>
       </div>
     </article>
   );
@@ -1150,12 +1779,20 @@ function MetricCard({
 
 function DashboardHome({
   coinItems,
+  favoriteActionLoadingId,
+  favoriteNewsIds,
   newsItems,
+  onAnalyzeNews,
   onChangeView,
+  onToggleNewsFavorite,
 }: {
   coinItems: CoinRankingItem[];
+  favoriteActionLoadingId: string;
+  favoriteNewsIds: Set<string>;
   newsItems: NewsRankingItem[];
+  onAnalyzeNews: (item: NewsRankingItem) => void;
   onChangeView: (view: ActiveView) => void;
+  onToggleNewsFavorite: (item: NewsRankingItem) => void;
 }) {
   const topCoin = coinItems[0] || emptyCoinItem;
   const topNews = newsItems[0] || emptyNewsItem;
@@ -1165,7 +1802,14 @@ function DashboardHome({
       <CommandHero topCoin={topCoin} topNews={topNews} onStart={() => onChangeView("chat")} />
       <div className="grid gap-5 xl:grid-cols-2">
         <RankingCard title="新闻风险排行榜 Top 10" action="查看全部" onAction={() => onChangeView("news")}>
-          <NewsTable items={newsItems.slice(0, 10)} compact />
+          <NewsTable
+            compact
+            favoriteActionLoadingId={favoriteActionLoadingId}
+            favoriteNewsIds={favoriteNewsIds}
+            items={newsItems.slice(0, 10)}
+            onAnalyzeNews={onAnalyzeNews}
+            onToggleFavorite={onToggleNewsFavorite}
+          />
         </RankingCard>
         <RankingCard title="币种风险排行榜 Top 10" action="查看全部" onAction={() => onChangeView("coin")}>
           <CoinTable items={coinItems.slice(0, 10)} compact />
@@ -1419,12 +2063,20 @@ function AnalysisCardsPanel({
 }
 
 function NewsView({
+  favoriteActionLoadingId,
+  favoriteNewsIds,
   items,
+  onAnalyzeNews,
   onChangeRange,
+  onToggleNewsFavorite,
   range,
 }: {
+  favoriteActionLoadingId: string;
+  favoriteNewsIds: Set<string>;
   items: NewsRankingItem[];
+  onAnalyzeNews: (item: NewsRankingItem) => void;
   onChangeRange: (range: RankingRange) => void;
+  onToggleNewsFavorite: (item: NewsRankingItem) => void;
   range: RankingRange;
 }) {
   const [filter, setFilter] = useState<NewsFilter>(() => readRankingFilter("news", "filter", "top10", isNewsFilter));
@@ -1451,14 +2103,18 @@ function NewsView({
     <>
       <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.4fr)_minmax(0,0.6fr)]">
         <DistributionCard {...distribution} />
-        <TrendCard title="今日风险趋势（按平均风险分）" />
+        <NewsRiskOverviewCard items={items} />
       </div>
       <NewsRankingPanel
+        favoriteActionLoadingId={favoriteActionLoadingId}
+        favoriteNewsIds={favoriteNewsIds}
         filter={filter}
         items={visibleItems}
+        onAnalyzeNews={onAnalyzeNews}
         onChangeFilter={handleChangeFilter}
         onChangeRange={onChangeRange}
         onChangeSort={handleChangeSort}
+        onToggleFavorite={onToggleNewsFavorite}
         range={range}
         sort={sort}
         total={items.length}
@@ -1500,7 +2156,7 @@ function CoinView({
     <>
       <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.4fr)_minmax(0,0.6fr)]">
         <DistributionCard {...distribution} />
-        <TrendCard title="热门币种风险趋势" withLegend />
+        <CoinRiskTrendCard items={items} range={range} />
       </div>
       <CoinRankingPanel
         filter={filter}
@@ -1604,30 +2260,40 @@ function CoinRankingPanel({
 }
 
 function NewsRankingPanel({
+  favoriteActionLoadingId,
+  favoriteNewsIds,
   filter,
   items,
+  onAnalyzeNews,
   onChangeFilter,
   onChangeRange,
   onChangeSort,
+  onToggleFavorite,
   range,
   sort,
   total,
 }: {
+  favoriteActionLoadingId: string;
+  favoriteNewsIds: Set<string>;
   filter: NewsFilter;
   items: NewsRankingItem[];
+  onAnalyzeNews: (item: NewsRankingItem) => void;
   onChangeFilter: (filter: NewsFilter) => void;
   onChangeRange: (range: RankingRange) => void;
   onChangeSort: (sort: NewsSort) => void;
+  onToggleFavorite: (item: NewsRankingItem) => void;
   range: RankingRange;
   sort: NewsSort;
   total: number;
 }) {
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const filters: Array<[NewsFilter, string]> = [
     ["all", "全部新闻"],
     ["top10", "Top10 风险新闻"],
     ["high", "高风险"],
     ["medium", "中风险"],
     ["low", "低风险"],
+    ["red", "红色预警"],
   ];
   const sortOptions: Array<[NewsSort, string]> = [
     ["time_desc", "发布时间：晚 → 早"],
@@ -1635,6 +2301,13 @@ function NewsRankingPanel({
     ["score_desc", "风险分：高 → 低"],
     ["score_asc", "风险分：低 → 高"],
   ];
+  const categoryOptions = useMemo(() => getNewsCategoryOptions(items), [items]);
+  const panelItems = useMemo(() => {
+    return items.filter((item) => {
+      const categoryMatched = categoryFilter === "all" || normalizeRiskType(item.risk_type) === categoryFilter;
+      return categoryMatched;
+    });
+  }, [categoryFilter, items]);
 
   return (
     <section className="risk-card rounded-lg">
@@ -1651,6 +2324,18 @@ function NewsRankingPanel({
           >
             {sortOptions.map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          <label className="text-xs font-bold text-slate-500" htmlFor="news-category">类别</label>
+          <select
+            id="news-category"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition-colors duration-200 hover:bg-blue-50 focus:border-blue-300"
+          >
+            <option value="all">全部类别</option>
+            {categoryOptions.map((category) => (
+              <option key={category} value={category}>{category}</option>
             ))}
           </select>
         </div>
@@ -1682,9 +2367,15 @@ function NewsRankingPanel({
         </div>
 
         <div className="risk-scroll max-h-[640px] overflow-auto rounded-lg border border-blue-100">
-          <NewsTable items={items} />
+          <NewsTable
+            favoriteActionLoadingId={favoriteActionLoadingId}
+            favoriteNewsIds={favoriteNewsIds}
+            items={panelItems}
+            onAnalyzeNews={onAnalyzeNews}
+            onToggleFavorite={onToggleFavorite}
+          />
         </div>
-        <TableFooter text={`当前显示 ${items.length} 条 / 全部 ${total} 条`} />
+        <TableFooter text={`当前显示 ${panelItems.length} 条 / 全部 ${total} 条`} />
       </div>
     </section>
   );
@@ -1692,21 +2383,27 @@ function NewsRankingPanel({
 
 function ReportsView({
   collapsed,
+  favoriteActionLoadingId,
+  favoriteReportIds,
   onDeleteAllRecords,
   onDeleteRecord,
   onChangeView,
   onReanalyze,
   onSelectRecord,
+  onToggleFavorite,
   onToggleCollapsed,
   records,
   selectedRecord,
 }: {
   collapsed: boolean;
+  favoriteActionLoadingId: string;
+  favoriteReportIds: Set<string>;
   onDeleteAllRecords: () => void;
   onDeleteRecord: (id: string) => void;
   onChangeView: (view: ActiveView) => void;
   onReanalyze: (input: string) => void;
   onSelectRecord: (id: string) => void;
+  onToggleFavorite: (record: AnalysisRecord) => void;
   onToggleCollapsed: () => void;
   records: AnalysisRecord[];
   selectedRecord: AnalysisRecord | null;
@@ -1766,7 +2463,10 @@ function ReportsView({
                       <div className="pl-2">
                         <div className="flex items-start justify-between gap-2">
                           <p className="min-w-0 truncate text-sm font-bold text-slate-900">{record.title}</p>
-                          <RiskBadge level={record.report.risk_level} />
+                          <div className="flex shrink-0 items-center gap-1">
+                            {favoriteReportIds.has(record.id) && <StarIcon filled />}
+                            <RiskBadge level={record.report.risk_level} />
+                          </div>
                         </div>
                         <p className="mt-2 text-xs text-slate-500">{record.createdAt}</p>
                       </div>
@@ -1784,7 +2484,14 @@ function ReportsView({
       </aside>
 
       {selectedRecord ? (
-        <ReportDocument onDeleteRecord={onDeleteRecord} onReanalyze={onReanalyze} record={selectedRecord} />
+        <ReportDocument
+          favoriteLoading={favoriteActionLoadingId === selectedRecord.id}
+          isFavorite={favoriteReportIds.has(selectedRecord.id)}
+          onDeleteRecord={onDeleteRecord}
+          onReanalyze={onReanalyze}
+          onToggleFavorite={onToggleFavorite}
+          record={selectedRecord}
+        />
       ) : (
         <EmptyReportsView onChangeView={onChangeView} />
       )}
@@ -1813,6 +2520,724 @@ function EmptyReportsView({ onChangeView }: { onChangeView: (view: ActiveView) =
         </button>
       </div>
     </article>
+  );
+}
+
+function MyView({
+  favoriteNews,
+  favoriteReports,
+  onChangeView,
+  onLoginClick,
+  user,
+}: {
+  favoriteNews: FavoriteItem[];
+  favoriteReports: FavoriteItem[];
+  onChangeView: (view: ActiveView) => void;
+  onLoginClick: () => void;
+  user: AuthUser | null;
+}) {
+  const [activeTab, setActiveTab] = useState<MyVaultTab>("overview");
+  const [watchlist, setWatchlist] = useState<PortfolioWatchlistItem[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(true);
+  const highRiskAssets = watchlist.filter((item) => item.risk_score >= 80 || ["high", "critical"].includes(item.risk_level));
+  const pendingAlerts = watchlist.filter((item) => item.risk_score >= item.alert_threshold || ["high", "critical"].includes(item.risk_level));
+  const recentReports = favoriteReports.slice(0, 4);
+  const recentNews = favoriteNews.slice(0, 4);
+  const lastUpdated = watchlist[0]?.updated_at || favoriteNews[0]?.created_at || favoriteReports[0]?.created_at || "--";
+  const tabs: Array<[MyVaultTab, string]> = [
+    ["overview", "总览"],
+    ["assets", "关注资产"],
+    ["news", "收藏新闻"],
+    ["reports", "收藏报告"],
+    ["alerts", "预警规则"],
+    ["reviews", "风险复盘"],
+  ];
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadWatchlist() {
+      setLoadingAssets(true);
+      try {
+        const items = await fetchPortfolioWatchlist();
+        if (!ignore) setWatchlist(items);
+      } catch (error) {
+        console.error(error);
+        if (!ignore) setWatchlist([]);
+      } finally {
+        if (!ignore) setLoadingAssets(false);
+      }
+    }
+    void loadWatchlist();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  return (
+    <section className="space-y-5">
+      <div className="rounded-lg border border-blue-100 bg-white p-5 shadow-sm shadow-blue-100/60 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">My Risk Vault</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">我的风控档案库</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              沉淀关注资产、收藏新闻、分析报告、预警规则和复盘记录；账户资料继续放在系统设置里。
+            </p>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-right">
+            <p className="text-xs font-bold text-blue-600">{user ? "当前用户" : "访客模式"}</p>
+            <p className="mt-1 max-w-[220px] truncate text-sm font-bold text-slate-950">{user?.display_name || user?.username || "未登录"}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">最近更新：{lastUpdated}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <VaultStatusCard label="关注资产" value={loadingAssets ? "--" : String(watchlist.length)} helper="来自我的风险资产" tone="blue" />
+          <VaultStatusCard label="高风险资产" value={loadingAssets ? "--" : String(highRiskAssets.length)} helper="风险分 >= 80" tone="red" />
+          <VaultStatusCard label="收藏新闻" value={String(favoriteNews.length)} helper="风险情报收藏" tone="green" />
+          <VaultStatusCard label="收藏报告" value={String(favoriteReports.length)} helper="AI 分析档案" tone="purple" />
+          <VaultStatusCard label="未处理预警" value={loadingAssets ? "--" : String(pendingAlerts.length)} helper="达到提醒线" tone="orange" />
+        </div>
+
+        {!user && (
+          <button
+            type="button"
+            onClick={onLoginClick}
+            className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition-colors duration-200 hover:bg-blue-700"
+          >
+            <UserIcon />
+            登录后同步风控档案
+          </button>
+        )}
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.62fr)_minmax(340px,0.38fr)]">
+        <VaultPanel
+          actionLabel="查看全部"
+          onAction={() => setActiveTab("assets")}
+          title="我的关注资产"
+        >
+          <VaultAssetTable compact items={watchlist.slice(0, 5)} loading={loadingAssets} />
+        </VaultPanel>
+
+        <VaultPanel title="近期预警与待处理事项">
+          <div className="space-y-2">
+            {pendingAlerts.length ? pendingAlerts.slice(0, 5).map((item) => (
+              <Link
+                className="block rounded-lg border border-orange-100 bg-orange-50/60 px-3 py-2 transition-colors duration-200 hover:bg-orange-100"
+                href={`/portfolio?asset=${encodeURIComponent(item.symbol)}&panel=decision`}
+                key={item.symbol}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-bold text-slate-950">{item.symbol}</span>
+                  <span className="text-sm font-bold text-orange-700">{item.risk_score}</span>
+                </div>
+                <p className="mt-1 line-clamp-1 text-xs font-semibold text-slate-600">
+                  AI 风险分已达到提醒线 {item.alert_threshold}，建议查看风险雷达。
+                </p>
+              </Link>
+            )) : (
+              <VaultEmpty text={loadingAssets ? "正在加载预警事项" : "暂无未处理预警"} />
+            )}
+          </div>
+        </VaultPanel>
+      </div>
+
+      <section className="rounded-lg border border-blue-100 bg-white shadow-sm shadow-blue-100/60">
+        <div className="risk-scroll flex gap-1 overflow-x-auto border-b border-blue-100 px-4 pt-3">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveTab(key)}
+              className={`relative h-11 shrink-0 px-3 text-sm font-bold transition-colors duration-200 ${
+                activeTab === key ? "text-blue-700" : "text-slate-500 hover:text-blue-700"
+              }`}
+              aria-pressed={activeTab === key}
+            >
+              {label}
+              {activeTab === key && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-blue-600" />}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-4 sm:p-5">
+          {activeTab === "overview" && (
+            <div className="grid gap-5 xl:grid-cols-2">
+              <VaultMiniList
+                actionLabel="去新闻收藏"
+                items={recentNews.map((item) => ({
+                  href: `/news/${encodeURIComponent(item.item_id)}`,
+                  meta: `${favoriteString(item, "risk_type", "综合风险")} · ${favoriteString(item, "published_at", item.created_at)}`,
+                  score: favoriteNumber(item, "risk_score"),
+                  title: item.title,
+                }))}
+                onAction={() => onChangeView("favoriteNews")}
+                title="最近收藏新闻"
+              />
+              <VaultMiniList
+                actionLabel="去报告收藏"
+                items={recentReports.map((item) => {
+                  const report = favoriteRecord(item, "report");
+                  return {
+                    href: `/reports?record=${encodeURIComponent(item.item_id)}`,
+                    meta: `收藏时间：${item.created_at}`,
+                    score: typeof report?.risk_score === "number" ? clampScore(report.risk_score) : 0,
+                    title: item.title,
+                  };
+                })}
+                onAction={() => onChangeView("favoriteReports")}
+                title="最近保存报告"
+              />
+            </div>
+          )}
+
+          {activeTab === "assets" && <VaultAssetTable items={watchlist} loading={loadingAssets} />}
+
+          {activeTab === "news" && (
+            <VaultMiniList
+              actionLabel="进入收藏新闻页"
+              items={favoriteNews.map((item) => ({
+                href: `/news/${encodeURIComponent(item.item_id)}`,
+                meta: `${favoriteStringArray(item, "coins").join(", ") || "--"} · ${favoriteString(item, "risk_type", "综合风险")}`,
+                score: favoriteNumber(item, "risk_score"),
+                title: item.title,
+              }))}
+              onAction={() => onChangeView("favoriteNews")}
+              title="收藏新闻"
+            />
+          )}
+
+          {activeTab === "reports" && (
+            <VaultMiniList
+              actionLabel="进入收藏报告页"
+              items={favoriteReports.map((item) => {
+                const report = favoriteRecord(item, "report");
+                return {
+                  href: `/reports?record=${encodeURIComponent(item.item_id)}`,
+                  meta: `生成/收藏时间：${item.created_at}`,
+                  score: typeof report?.risk_score === "number" ? clampScore(report.risk_score) : 0,
+                  title: item.title,
+                };
+              })}
+              onAction={() => onChangeView("favoriteReports")}
+              title="收藏报告"
+            />
+          )}
+
+          {activeTab === "alerts" && (
+            <VaultAlertRules items={watchlist} loading={loadingAssets} />
+          )}
+
+          {activeTab === "reviews" && (
+            <VaultReviewList reports={favoriteReports} watchlist={watchlist} />
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function VaultStatusCard({
+  helper,
+  label,
+  tone,
+  value,
+}: {
+  helper: string;
+  label: string;
+  tone: "blue" | "green" | "orange" | "purple" | "red";
+  value: string;
+}) {
+  const toneClass = {
+    blue: "border-blue-100 bg-blue-50 text-blue-700",
+    green: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    orange: "border-orange-100 bg-orange-50 text-orange-700",
+    purple: "border-violet-100 bg-violet-50 text-violet-700",
+    red: "border-red-100 bg-red-50 text-red-700",
+  }[tone];
+  return (
+    <article className={`min-h-[104px] rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-xs font-bold uppercase tracking-[0.12em] opacity-80">{label}</p>
+      <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
+      <p className="mt-2 text-xs font-semibold text-slate-600">{helper}</p>
+    </article>
+  );
+}
+
+function VaultPanel({
+  actionLabel,
+  children,
+  onAction,
+  title,
+}: {
+  actionLabel?: string;
+  children: ReactNode;
+  onAction?: () => void;
+  title: string;
+}) {
+  return (
+    <section className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm shadow-blue-100/60">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="font-bold text-slate-950">{title}</h3>
+        {actionLabel && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="h-8 rounded-lg border border-blue-100 bg-white px-3 text-xs font-bold text-blue-700 transition-colors duration-200 hover:bg-blue-50"
+          >
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function VaultAssetTable({
+  compact = false,
+  items,
+  loading,
+}: {
+  compact?: boolean;
+  items: PortfolioWatchlistItem[];
+  loading: boolean;
+}) {
+  if (loading) return <VaultEmpty text="正在加载关注资产" />;
+  if (!items.length) return <VaultEmpty text="暂无关注资产，可先到我的风险资产添加币种" />;
+  return (
+    <div className="risk-scroll overflow-x-auto rounded-lg border border-blue-100">
+      <table className={`w-full text-left text-sm ${compact ? "min-w-[720px]" : "min-w-[980px]"}`}>
+        <thead className="border-b border-blue-100 bg-slate-50 text-xs font-bold text-slate-500">
+          <tr>
+            <th className="px-3 py-3">资产</th>
+            {!compact && <th className="px-3 py-3">当前价格</th>}
+            <th className="px-3 py-3 text-center">风险分</th>
+            <th className="px-3 py-3 text-center">风险等级</th>
+            <th className="px-3 py-3 text-center">今日预警</th>
+            <th className="px-3 py-3 text-center">24H</th>
+            <th className="px-3 py-3 text-center">操作</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-blue-50">
+          {items.map((item) => {
+            const alerting = item.risk_score >= item.alert_threshold || ["high", "critical"].includes(item.risk_level);
+            return (
+              <tr key={item.symbol} className="transition-colors duration-200 hover:bg-blue-50/50">
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2">
+                    <CoinMark symbol={item.symbol} />
+                    <div>
+                      <p className="font-bold text-slate-950">{item.symbol}</p>
+                      <p className="text-xs font-semibold text-slate-500">{item.is_holding ? "持仓中" : "关注中"}</p>
+                    </div>
+                  </div>
+                </td>
+                {!compact && <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{formatCurrency(item.current_price)}</td>}
+                <td className={`px-3 py-3 text-center font-bold tabular-nums ${riskScoreTextStyle(item.risk_score, item.risk_level)}`}>{clampScore(item.risk_score)}</td>
+                <td className="px-3 py-3 text-center"><RiskBadge level={formatPortfolioVaultRiskLevel(item.risk_level)} /></td>
+                <td className="px-3 py-3 text-center font-bold text-orange-600">{alerting ? 1 : 0}</td>
+                <td className={`px-3 py-3 text-center font-bold ${item.price_change_24h >= 0 ? "text-emerald-600" : "text-red-600"}`}>{formatVaultPercent(item.price_change_24h)}</td>
+                <td className="px-3 py-3 text-center">
+                  <Link
+                    href={`/portfolio?asset=${encodeURIComponent(item.symbol)}`}
+                    className="inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-3 text-xs font-bold text-white transition-colors duration-200 hover:bg-blue-700"
+                  >
+                    查看雷达
+                  </Link>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function VaultMiniList({
+  actionLabel,
+  items,
+  onAction,
+  title,
+}: {
+  actionLabel: string;
+  items: Array<{ href: string; meta: string; score: number; title: string }>;
+  onAction: () => void;
+  title: string;
+}) {
+  return (
+    <VaultPanel actionLabel={actionLabel} onAction={onAction} title={title}>
+      <div className="space-y-2">
+        {items.length ? items.slice(0, 8).map((item) => (
+          <Link
+            className="flex items-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 transition-colors duration-200 hover:bg-blue-50"
+            href={item.href}
+            key={`${item.href}-${item.title}`}
+          >
+            <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-sm font-bold ${item.score >= 80 ? "bg-red-50 text-red-600" : item.score >= 50 ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600"}`}>
+              {item.score || "--"}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="line-clamp-1 font-bold text-slate-950">{item.title}</span>
+              <span className="mt-1 block truncate text-xs font-semibold text-slate-500">{item.meta}</span>
+            </span>
+            <ChevronRightIcon />
+          </Link>
+        )) : (
+          <VaultEmpty text="暂无档案内容" />
+        )}
+      </div>
+    </VaultPanel>
+  );
+}
+
+function VaultAlertRules({ items, loading }: { items: PortfolioWatchlistItem[]; loading: boolean }) {
+  if (loading) return <VaultEmpty text="正在加载预警规则" />;
+  if (!items.length) return <VaultEmpty text="暂无预警规则，添加关注资产后会生成默认风险分提醒线" />;
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3" key={item.symbol}>
+          <div>
+            <p className="font-bold text-slate-950">{item.symbol}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">AI 风险分 &gt;= {item.alert_threshold} 时提醒</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`rounded-lg px-2 py-1 text-xs font-bold ${item.risk_score >= item.alert_threshold ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+              {item.risk_score >= item.alert_threshold ? "已触发" : "监控中"}
+            </span>
+            <Link className="h-8 rounded-lg border border-blue-100 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50" href={`/portfolio?asset=${encodeURIComponent(item.symbol)}&panel=alert`}>
+              设置
+            </Link>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VaultReviewList({ reports, watchlist }: { reports: FavoriteItem[]; watchlist: PortfolioWatchlistItem[] }) {
+  if (!reports.length) return <VaultEmpty text="暂无风险复盘记录。收藏报告后，这里会展示当时风险分与当前风险分对比。" />;
+  return (
+    <div className="space-y-3">
+      {reports.slice(0, 8).map((favorite) => {
+        const report = favoriteRecord(favorite, "report");
+        const savedScore = typeof report?.risk_score === "number" ? clampScore(report.risk_score) : 0;
+        const symbol = inferAssetSymbolFromFavorite(favorite);
+        const currentScore = watchlist.find((item) => symbol && item.symbol.includes(symbol))?.risk_score;
+        const diff = typeof currentScore === "number" ? currentScore - savedScore : null;
+        return (
+          <Link
+            className="grid gap-3 rounded-lg border border-blue-100 bg-white p-4 transition-colors duration-200 hover:bg-blue-50 md:grid-cols-[minmax(0,1fr)_160px]"
+            href={`/reports?record=${encodeURIComponent(favorite.item_id)}`}
+            key={favorite.id}
+          >
+            <div className="min-w-0">
+              <p className="line-clamp-1 font-bold text-slate-950">{favorite.title}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">保存时风险分 {savedScore} · {favorite.created_at}</p>
+            </div>
+            <div className="text-sm font-bold text-slate-700">
+              当前：{typeof currentScore === "number" ? currentScore : "--"}
+              {diff !== null && <span className={diff <= 0 ? "ml-2 text-emerald-600" : "ml-2 text-red-600"}>{diff >= 0 ? "+" : ""}{diff}</span>}
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function VaultEmpty({ text }: { text: string }) {
+  return <div className="rounded-lg border border-dashed border-blue-100 bg-blue-50/50 px-4 py-8 text-center text-sm font-semibold text-slate-500">{text}</div>;
+}
+
+function formatPortfolioVaultRiskLevel(level: string) {
+  if (level === "critical") return "极高风险";
+  if (level === "high") return "高风险";
+  if (level === "medium") return "中风险";
+  return "低风险";
+}
+
+function formatCurrency(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  return `${formatVaultNumber(value, value >= 100 ? 2 : 6)} USDT`;
+}
+
+function formatVaultNumber(value: number, digits = 2) {
+  if (!Number.isFinite(value)) return "--";
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: value >= 100 ? 2 : 0,
+  });
+}
+
+function formatVaultPercent(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  const normalized = Math.abs(value) > 1 ? value / 100 : value;
+  return `${normalized >= 0 ? "+" : ""}${(normalized * 100).toFixed(2)}%`;
+}
+
+function inferAssetSymbolFromFavorite(favorite: FavoriteItem) {
+  const coins = favoriteStringArray(favorite, "coins");
+  if (coins[0]) return coins[0].replace(/USDT$/, "");
+  const input = favoriteString(favorite, "input", favorite.title);
+  const match = input.match(/\b[A-Z]{2,12}USDT\b|\b(BTC|ETH|SOL|BNB|XRP|SUI|TON)\b/);
+  return match?.[0]?.replace(/USDT$/, "") || "";
+}
+
+function FavoriteNewsView({
+  favorites,
+  onAnalyzeNewsInput,
+  onChangeView,
+  onLoginClick,
+  user,
+}: {
+  favorites: FavoriteItem[];
+  onAnalyzeNewsInput: (input: string) => void;
+  onChangeView: (view: ActiveView) => void;
+  onLoginClick: () => void;
+  user: AuthUser | null;
+}) {
+  return (
+    <FavoriteVaultShell
+      actionLabel="去新闻榜发现风险"
+      count={favorites.length}
+      emptyText="还没有收藏新闻。你可以在新闻榜星标关键事件，形成自己的风险情报流。"
+      eyebrow="News Collection"
+      onAction={() => onChangeView("news")}
+      onLoginClick={onLoginClick}
+      title="收藏新闻"
+      user={user}
+    >
+      <div className="grid gap-4 lg:grid-cols-2">
+        {favorites.map((favorite) => {
+          const score = favoriteNumber(favorite, "risk_score");
+          const level = favoriteString(favorite, "risk_level", "未标记");
+          const publishedAt = favoriteString(favorite, "published_at", favorite.created_at);
+          const coins = favoriteStringArray(favorite, "coins");
+          return (
+            <article key={favorite.id} className="group rounded-lg border border-blue-100 bg-white p-4 shadow-sm shadow-blue-100/60 transition-colors duration-200 hover:border-blue-300 hover:bg-blue-50/40">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">Risk News</p>
+                  <h3 className="mt-3 line-clamp-2 text-lg font-bold leading-7 text-slate-950">{favorite.title}</h3>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-amber-700">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em]">Score</p>
+                  <p className="text-2xl font-bold">{score}</p>
+                </div>
+              </div>
+              <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">{favoriteString(favorite, "summary", "暂无摘要。")}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <RiskBadge level={level} />
+                {coins.slice(0, 4).map((coin) => (
+                  <span key={coin} className="rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{coin}</span>
+                ))}
+              </div>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-blue-50 pt-4">
+                <p className="text-xs font-semibold text-slate-500">{publishedAt}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onAnalyzeNewsInput(buildFavoriteNewsAnalysisInput(favorite))}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white transition-colors duration-200 hover:bg-blue-700"
+                  >
+                    <ShieldIcon />
+                    深入分析
+                  </button>
+                  <Link
+                    href={`/news/${encodeURIComponent(favorite.item_id)}`}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-bold text-blue-700 transition-colors duration-200 hover:bg-blue-50"
+                  >
+                    查看新闻
+                    <ChevronRightIcon />
+                  </Link>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </FavoriteVaultShell>
+  );
+}
+
+function FavoriteReportsView({
+  favorites,
+  onChangeView,
+  onLoginClick,
+  user,
+}: {
+  favorites: FavoriteItem[];
+  onChangeView: (view: ActiveView) => void;
+  onLoginClick: () => void;
+  user: AuthUser | null;
+}) {
+  return (
+    <FavoriteVaultShell
+      actionLabel="去分析报告"
+      count={favorites.length}
+      emptyText="还没有收藏报告。完成事件分析后，在报告详情页收藏高价值研判。"
+      eyebrow="Report Collection"
+      onAction={() => onChangeView("reports")}
+      onLoginClick={onLoginClick}
+      title="收藏报告"
+      user={user}
+    >
+      <div className="space-y-4">
+        {favorites.map((favorite) => {
+          const report = favoriteRecord(favorite, "report");
+          const score = typeof report?.risk_score === "number" ? clampScore(report.risk_score) : 0;
+          const level = typeof report?.risk_level === "string" ? report.risk_level : "未标记";
+          const input = favoriteString(favorite, "input", "暂无原始输入。");
+          return (
+            <article key={favorite.id} className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm shadow-blue-100/60 transition-colors duration-200 hover:border-blue-300 hover:bg-blue-50/40 sm:p-5">
+              <div className="grid gap-4 lg:grid-cols-[120px_minmax(0,1fr)_160px]">
+                <div className="rounded-lg border border-violet-100 bg-violet-50 p-4 text-center text-violet-700">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em]">Risk</p>
+                  <p className="mt-2 text-4xl font-bold">{score}</p>
+                  <div className="mt-3 flex justify-center"><RiskBadge level={level} /></div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">Agent Report</p>
+                  <h3 className="mt-3 break-words text-xl font-bold leading-8 text-slate-950">{favorite.title}</h3>
+                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{typeof report?.summary === "string" ? report.summary : input}</p>
+                  <p className="mt-3 text-xs font-semibold text-slate-500">收藏时间：{favorite.created_at}</p>
+                </div>
+                <div className="flex items-end lg:justify-end">
+                  <Link
+                    href={`/reports?record=${encodeURIComponent(favorite.item_id)}`}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white transition-colors duration-200 hover:bg-blue-700 lg:w-auto"
+                  >
+                    查看报告
+                    <ChevronRightIcon />
+                  </Link>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </FavoriteVaultShell>
+  );
+}
+
+function FavoriteVaultShell({
+  actionLabel,
+  children,
+  count,
+  emptyText,
+  eyebrow,
+  onAction,
+  onLoginClick,
+  title,
+  user,
+}: {
+  actionLabel: string;
+  children: ReactNode;
+  count: number;
+  emptyText: string;
+  eyebrow: string;
+  onAction: () => void;
+  onLoginClick: () => void;
+  title: string;
+  user: AuthUser | null;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-blue-100 bg-white shadow-xl shadow-blue-100/60">
+      <div className="border-b border-blue-100 bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_62%,#fff9ed_100%)] p-5 sm:p-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-blue-600">{eyebrow}</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">{title}</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+              星标沉淀高价值风险材料，形成可复盘、可追踪、可展示的个人风控资产。
+            </p>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-white/80 px-5 py-4 text-right shadow-sm shadow-blue-100">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Saved</p>
+            <p className="mt-1 text-4xl font-bold text-slate-950">{count}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-8">
+        {!user ? (
+          <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50/70 p-6 text-center">
+            <p className="text-lg font-bold text-slate-950">登录后查看收藏</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">收藏内容按用户保存到 SQLite，需要先登录才能读取。</p>
+            <button type="button" onClick={onLoginClick} className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition-colors duration-200 hover:bg-blue-700">
+              <UserIcon />
+              登录
+            </button>
+          </div>
+        ) : count ? (
+          children
+        ) : (
+          <div className="rounded-lg border border-dashed border-blue-200 bg-slate-50 p-6 text-center text-blue-600">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm"><StarIcon /></div>
+            <p className="mt-3 text-lg font-bold text-slate-950">收藏夹还是空的</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{emptyText}</p>
+            <button type="button" onClick={onAction} className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition-colors duration-200 hover:bg-blue-700">
+              {actionLabel}
+              <ChevronRightIcon />
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FavoriteEntryCard({
+  action,
+  count,
+  description,
+  icon,
+  onClick,
+  title,
+  tone,
+}: {
+  action: string;
+  count: number;
+  description: string;
+  icon: ReactNode;
+  onClick: () => void;
+  title: string;
+  tone: "emerald" | "violet";
+}) {
+  const toneClass = tone === "emerald"
+    ? "border-emerald-100 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100/70"
+    : "border-violet-100 bg-violet-50 text-violet-700 hover:border-violet-300 hover:bg-violet-100/70";
+  return (
+    <button type="button" onClick={onClick} className={`rounded-lg border p-5 text-left shadow-sm transition-colors duration-200 ${toneClass}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-blue-600 shadow-sm">{icon}</div>
+        <span className="text-3xl font-bold text-slate-950">{count}</span>
+      </div>
+      <h3 className="mt-5 text-xl font-bold text-slate-950">{title}</h3>
+      <p className="mt-2 min-h-12 text-sm leading-6 text-slate-600">{description}</p>
+      <span className="mt-5 inline-flex items-center gap-2 text-sm font-bold">
+        {action}
+        <ChevronRightIcon />
+      </span>
+    </button>
+  );
+}
+
+function VaultMetric({ label, tone, value }: { label: string; tone: "amber" | "emerald" | "violet"; value: string }) {
+  const toneClass = {
+    amber: "border-amber-100 bg-amber-50 text-amber-700",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    violet: "border-violet-100 bg-violet-50 text-violet-700",
+  }[tone];
+  return (
+    <div className={`rounded-lg border p-4 shadow-sm ${toneClass}`}>
+      <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-80">{label}</p>
+      <p className="mt-2 truncate text-2xl font-bold text-slate-950">{value}</p>
+    </div>
   );
 }
 
@@ -2401,25 +3826,41 @@ function RankingCard({
   );
 }
 
-function NewsTable({ compact = false, items }: { compact?: boolean; items: NewsRankingItem[] }) {
+function NewsTable({
+  compact = false,
+  favoriteActionLoadingId = "",
+  favoriteNewsIds = new Set<string>(),
+  items,
+  onAnalyzeNews,
+  onToggleFavorite,
+}: {
+  compact?: boolean;
+  favoriteActionLoadingId?: string;
+  favoriteNewsIds?: Set<string>;
+  items: NewsRankingItem[];
+  onAnalyzeNews?: (item: NewsRankingItem) => void;
+  onToggleFavorite?: (item: NewsRankingItem) => void;
+}) {
   const router = useRouter();
   const headers = [
+    { label: "", className: "w-12 px-3 py-3 text-center font-semibold" },
     { label: "#", className: "w-14 px-3 py-3 text-center font-semibold" },
     { label: "新闻标题", className: `${compact ? "min-w-[260px]" : "min-w-[340px]"} px-3 py-3 text-left font-semibold` },
     { label: "风险类别", className: "min-w-[140px] px-3 py-3 text-left font-semibold" },
     { label: "关联币种", className: "min-w-[120px] px-3 py-3 text-left font-semibold" },
     { label: "风险分", className: "w-24 px-3 py-3 text-center font-semibold" },
     { label: "风险等级", className: "w-28 px-3 py-3 text-center font-semibold" },
+    { label: "操作", className: "w-36 px-3 py-3 text-center font-semibold" },
     { label: compact ? "" : "发布时间", className: "min-w-[160px] px-3 py-3 text-left font-semibold" },
   ];
 
   return (
     <div className="risk-scroll overflow-x-auto">
-      <table className={`risk-table w-full text-left text-sm ${compact ? "min-w-[760px]" : "min-w-[1080px]"}`}>
+      <table className={`risk-table w-full text-left text-sm ${compact ? "min-w-[900px]" : "min-w-[1210px]"}`}>
         <thead className="border-y border-blue-100 bg-slate-50 text-xs text-slate-500">
           <tr>
-            {headers.map((head) => (
-              <th key={head.label || "blank"} className={head.className}>{head.label}</th>
+            {headers.map((head, index) => (
+              <th key={`${head.label || "blank"}-${index}`} className={head.className}>{head.label}</th>
             ))}
           </tr>
         </thead>
@@ -2441,6 +3882,24 @@ function NewsTable({ compact = false, items }: { compact?: boolean; items: NewsR
               }}
               className="cursor-pointer text-slate-700 transition-colors duration-200 hover:bg-blue-50/70"
             >
+              <td className="px-3 py-3 text-center">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleFavorite?.(item);
+                  }}
+                  disabled={!onToggleFavorite || favoriteActionLoadingId === `news:${item.news_id}`}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                    favoriteNewsIds.has(String(item.news_id))
+                      ? "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                      : "text-slate-400 hover:bg-blue-50 hover:text-blue-700"
+                  }`}
+                  aria-label={favoriteNewsIds.has(String(item.news_id)) ? "取消收藏新闻" : "收藏新闻"}
+                >
+                  <StarIcon filled={favoriteNewsIds.has(String(item.news_id))} />
+                </button>
+              </td>
               <td className="px-3 py-3 text-center font-semibold text-slate-900">{index + 1}</td>
               <td className="px-3 py-3 font-semibold text-slate-800">
                 <span className="line-clamp-1 text-blue-700">{item.title}</span>
@@ -2451,6 +3910,20 @@ function NewsTable({ compact = false, items }: { compact?: boolean; items: NewsR
                 {clampScore(item.risk_score)}
               </td>
               <td className="px-3 py-3 text-center"><RiskBadge level={item.risk_level} /></td>
+              <td className="px-3 py-3 text-center">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAnalyzeNews?.(item);
+                  }}
+                  disabled={!onAnalyzeNews}
+                  className="inline-flex h-9 min-w-[104px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-3 text-xs font-bold text-white shadow-sm shadow-blue-100 transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ShieldIcon />
+                  深入分析
+                </button>
+              </td>
               <td className="whitespace-nowrap px-3 py-3 text-slate-500">{compact ? "" : item.published_at || "--"}</td>
             </tr>
           )) : (
@@ -2472,6 +3945,10 @@ function CoinTable({ compact = false, items }: { compact?: boolean; items: CoinR
     { label: "#", className: "w-14 px-3 py-3 text-center font-semibold" },
     { label: "币种", className: "min-w-[150px] px-3 py-3 text-left font-semibold" },
     { label: "风险类别", className: "min-w-[260px] px-3 py-3 text-left font-semibold" },
+    ...(!compact ? [
+      { label: "主要风险来源", className: "min-w-[180px] px-3 py-3 text-left font-semibold" },
+      { label: "最近关键事件", className: "min-w-[260px] px-3 py-3 text-left font-semibold" },
+    ] : []),
     { label: "风险分", className: "w-24 px-3 py-3 text-center font-semibold" },
     { label: "风险等级", className: "w-28 px-3 py-3 text-center font-semibold" },
     { label: "相关新闻数", className: "w-28 px-3 py-3 text-center font-semibold" },
@@ -2480,11 +3957,11 @@ function CoinTable({ compact = false, items }: { compact?: boolean; items: CoinR
 
   return (
     <div className="risk-scroll overflow-x-auto">
-      <table className={`risk-table w-full text-left text-sm ${compact ? "min-w-[760px]" : "min-w-[900px]"}`}>
+      <table className={`risk-table w-full text-left text-sm ${compact ? "min-w-[760px]" : "min-w-[1280px]"}`}>
         <thead className="border-y border-blue-100 bg-slate-50 text-xs text-slate-500">
           <tr>
-            {headers.map((head) => (
-              <th key={head.label || "blank"} className={head.className}>{head.label}</th>
+            {headers.map((head, index) => (
+              <th key={`${head.label || "blank"}-${index}`} className={head.className}>{head.label}</th>
             ))}
           </tr>
         </thead>
@@ -2513,12 +3990,39 @@ function CoinTable({ compact = false, items }: { compact?: boolean; items: CoinR
                 </div>
               </td>
               <td className="px-3 py-3 text-slate-600">{item.main_risk_type || "综合风险"}</td>
+              {!compact && (
+                <>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {getCoinRiskSources(item).map((source) => (
+                        <span key={source} className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">
+                          {source}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-slate-600">
+                    <span className="line-clamp-1">{getCoinKeyEvent(item)}</span>
+                  </td>
+                </>
+              )}
               <td className={`px-3 py-3 text-center font-bold tabular-nums ${riskScoreTextStyle(item.final_score, item.risk_level)}`}>
                 {clampScore(item.final_score)}
               </td>
               <td className="px-3 py-3 text-center"><RiskBadge level={item.risk_level} /></td>
               <td className="px-3 py-3 text-center tabular-nums">{item.news_count}</td>
-              <td className="px-3 py-3 text-center">{compact ? "" : <span className="inline-flex"><MiniTrend /></span>}</td>
+              <td className="px-3 py-3 text-center">
+                {compact ? "" : (
+                  <span className="inline-flex">
+                    <SparklineChart
+                      ariaLabel={`${item.symbol} 24小时风险趋势`}
+                      className="h-8 w-24"
+                      series={buildCoinTrendSeries(item, "24h")}
+                      tone={getRiskTone(item.final_score)}
+                    />
+                  </span>
+                )}
+              </td>
             </tr>
           )) : (
             <tr>
@@ -2547,12 +4051,18 @@ function BulletList({ items }: { items: string[] }) {
 }
 
 function ReportDocument({
+  favoriteLoading,
+  isFavorite,
   onDeleteRecord,
   onReanalyze,
+  onToggleFavorite,
   record,
 }: {
+  favoriteLoading: boolean;
+  isFavorite: boolean;
   onDeleteRecord: (id: string) => void;
   onReanalyze: (input: string) => void;
+  onToggleFavorite: (record: AnalysisRecord) => void;
   record: AnalysisRecord;
 }) {
   const report = record.report;
@@ -2598,6 +4108,19 @@ function ReportDocument({
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <button
               type="button"
+              onClick={() => onToggleFavorite(record)}
+              disabled={favoriteLoading}
+              className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border px-4 text-sm font-bold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                isFavorite
+                  ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                  : "border-blue-100 bg-white text-slate-700 hover:bg-blue-50"
+              }`}
+            >
+              <StarIcon filled={isFavorite} />
+              {favoriteLoading ? "处理中..." : isFavorite ? "取消收藏" : "收藏报告"}
+            </button>
+            <button
+              type="button"
               onClick={() => onDeleteRecord(record.id)}
               className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition-colors duration-200 hover:bg-rose-100 sm:w-auto"
             >
@@ -2617,6 +4140,10 @@ function ReportDocument({
       </div>
 
       <div className="space-y-5 p-4 sm:p-8">
+        <ReportSection title="原始输入" icon={<ChatIcon />}>
+          <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{record.input}</p>
+        </ReportSection>
+
         <section className="grid gap-4 rounded-lg border border-blue-100 bg-slate-50 p-4 sm:gap-5 sm:p-5 lg:grid-cols-[180px_minmax(0,1fr)_220px]">
           <div className="rounded-lg bg-white p-5 text-center shadow-sm">
             <p className="text-sm font-semibold text-slate-500">风险评分</p>
@@ -2669,10 +4196,6 @@ function ReportDocument({
             <AdvicePanel advice={adviceGeneration} fallback={report.advice || []} isWeakRisk={isWeakRisk} />
           </ReportSection>
         </div>
-
-        <ReportSection title="原始输入" icon={<ChatIcon />}>
-          <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{record.input}</p>
-        </ReportSection>
       </div>
     </article>
   );
@@ -3300,36 +4823,134 @@ function DistributionCard({
   );
 }
 
-function TrendCard({ title, withLegend = false }: { title: string; withLegend?: boolean }) {
+function NewsRiskOverviewCard({ items }: { items: NewsRankingItem[] }) {
+  const redAlerts = items.filter(isRedAlertNews).slice(0, 3);
+  const categories = getNewsCategoryOptions(items).slice(0, 6).map((category) => ({
+    category,
+    count: items.filter((item) => normalizeRiskType(item.risk_type) === category).length,
+  }));
+
   return (
     <section className="risk-card rounded-lg p-5">
-      <div className="flex items-center justify-between">
-        <PanelTitle icon={<ChartIcon />} title={title} />
-        <span className="rounded-lg border border-blue-100 px-2 py-1 text-xs font-semibold text-slate-500">24小时</span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <PanelTitle icon={<ChartIcon />} title="新闻风险概览" />
+          <p className="mt-1 text-xs font-semibold text-slate-500">新闻是离散事件，这里只展示类别和红色预警摘要</p>
+        </div>
+        <span className="rounded-lg border border-blue-100 px-2 py-1 text-xs font-semibold text-slate-500">{items.length} 条新闻</span>
       </div>
-      <div className="mt-5 h-40 rounded-lg bg-slate-50 p-3">
-        <svg className="h-full w-full" viewBox="0 0 340 130" role="img" aria-label="风险趋势">
-          {[20, 50, 80, 110].map((y) => (
-            <line key={y} x1="0" x2="340" y1={y} y2={y} stroke="#dbeafe" strokeDasharray="4 4" />
+      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
+        <div className="space-y-2">
+          {categories.length ? categories.map((item) => (
+            <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-slate-50 px-3 py-2 text-sm" key={item.category}>
+              <span className="font-semibold text-slate-700">{item.category}</span>
+              <span className="font-bold text-blue-700">{item.count}</span>
+            </div>
+          )) : (
+            <div className="rounded-lg border border-dashed border-blue-100 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">暂无类别数据</div>
+          )}
+        </div>
+        <div className="rounded-lg border border-red-100 bg-red-50/50 p-3">
+          <p className="text-xs font-bold text-red-700">红色预警</p>
+          <div className="mt-2 space-y-2">
+            {redAlerts.length ? redAlerts.map((item) => (
+              <div className="rounded-md bg-white px-3 py-2" key={item.news_id}>
+                <p className="line-clamp-1 text-sm font-bold text-slate-950">{item.title}</p>
+                <p className="mt-1 text-xs font-semibold text-red-600">风险分 {clampScore(item.risk_score)} · {item.risk_type || "综合风险"}</p>
+              </div>
+            )) : (
+              <p className="rounded-md bg-white px-3 py-6 text-center text-sm font-semibold text-slate-500">当前没有红色预警新闻</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CoinRiskTrendCard({ items, range }: { items: CoinRankingItem[]; range: RankingRange }) {
+  const rankedSymbols = useMemo(() => items.slice(0, 6).map((item) => item.symbol), [items]);
+  const [symbolToAdd, setSymbolToAdd] = useState("");
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
+  useEffect(() => {
+    setSelectedSymbols((current) => {
+      const valid = current.filter((symbol) => rankedSymbols.includes(symbol)).slice(0, 3);
+      return valid.length ? valid : rankedSymbols.slice(0, 3);
+    });
+    setSymbolToAdd((current) => current || rankedSymbols[0] || "");
+  }, [rankedSymbols]);
+  const activeSymbols = selectedSymbols.filter((symbol) => rankedSymbols.includes(symbol)).slice(0, 3);
+  const palette = ["#2563eb", "#f97316", "#10b981", "#dc2626", "#7c3aed", "#0f766e"];
+  const seriesSets = activeSymbols.map((symbol, index) => {
+    const item = items.find((coin) => coin.symbol === symbol);
+    return {
+      color: palette[index % palette.length],
+      label: symbol,
+      points: item ? buildCoinTrendSeries(item, range) : [],
+    };
+  });
+
+  function addSymbol() {
+    if (!symbolToAdd) return;
+    setSelectedSymbols((current) => {
+      if (current.includes(symbolToAdd)) return current;
+      return [...current, symbolToAdd].slice(-3);
+    });
+  }
+
+  function removeSymbol(symbol: string) {
+    setSelectedSymbols((current) => {
+      const next = current.filter((item) => item !== symbol);
+      return next.length ? next : rankedSymbols.slice(0, 1);
+    });
+  }
+
+  return (
+    <section className="risk-card rounded-lg p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <PanelTitle icon={<ChartIcon />} title="热门币种风险趋势" />
+          <p className="mt-1 text-xs font-semibold text-slate-500">点击币种对比，最多同时展示 3 条风险曲线</p>
+        </div>
+        <span className="rounded-lg border border-blue-100 px-2 py-1 text-xs font-semibold text-slate-500">
+          {range === "24h" ? "近1天" : "近7天"}
+        </span>
+      </div>
+      <MultiLineTrendChart className="mt-5 h-44" seriesSets={seriesSets} />
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+        <label className="font-bold text-slate-500" htmlFor="coin-trend-symbol">选择币种</label>
+        <select
+          id="coin-trend-symbol"
+          value={symbolToAdd}
+          onChange={(event) => setSymbolToAdd(event.target.value)}
+          className="h-9 rounded-lg border border-blue-100 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition-colors duration-200 hover:bg-blue-50 focus:border-blue-300"
+        >
+          {rankedSymbols.map((symbol) => (
+            <option key={symbol} value={symbol}>{symbol}</option>
           ))}
-          <polyline
-            points="0,86 26,91 52,78 78,88 104,67 130,72 156,62 182,47 208,70 234,49 260,43 286,55 312,50 340,42"
-            fill="none"
-            stroke="#2563eb"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <circle cx="130" cy="72" r="5" fill="#2563eb" />
-        </svg>
-      </div>
-      {withLegend && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
-          {["SOL", "FTT", "LUNC", "XRP", "BNB"].map((item) => (
-            <span key={item} className="rounded-full border border-blue-100 px-3 py-1">{item}</span>
+        </select>
+        <button
+          type="button"
+          onClick={addSymbol}
+          disabled={!symbolToAdd || activeSymbols.includes(symbolToAdd)}
+          className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          添加到图表
+        </button>
+        <div className="flex flex-wrap gap-2">
+          {activeSymbols.map((symbol) => (
+            <button
+              key={symbol}
+              type="button"
+              onClick={() => removeSymbol(symbol)}
+              className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 transition-colors duration-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              aria-label={`移除 ${symbol}`}
+            >
+              {symbol} ×
+            </button>
           ))}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -3402,41 +5023,189 @@ function Legend({ color, label, value }: { color: string; label: string; value: 
   );
 }
 
-function Sparkline({ tone }: { tone: "blue" | "red" | "orange" | "green" | "purple" }) {
-  const color = {
-    blue: "#2563eb",
-    red: "#ef4444",
-    orange: "#f97316",
-    green: "#10b981",
-    purple: "#7c3aed",
-  }[tone];
-
+function SparklineChart({
+  ariaLabel,
+  className,
+  series,
+  tone,
+}: {
+  ariaLabel: string;
+  className?: string;
+  series: TrendPoint[];
+  tone: MetricTone;
+}) {
+  const color = getToneColor(tone);
+  const width = 96;
+  const height = 36;
+  const points = getChartPoints(normalizeTrendSeries(series), width, height, 3);
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const latest = series[series.length - 1];
+  const latestPoint = points[points.length - 1];
+  const title = latest ? `${latest.label}: ${latest.value}` : ariaLabel;
   return (
-    <svg className="mt-8 h-8 w-20" viewBox="0 0 88 32" aria-hidden="true">
-      <polyline
-        points="0,24 10,20 18,23 28,12 38,18 48,8 58,25 68,16 78,20 88,12"
-        fill="none"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className || "h-8 w-20"} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={ariaLabel}>
+      <title>{title}</title>
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {latestPoint && <circle cx={latestPoint.x} cy={latestPoint.y} r="2.5" fill={color} />}
     </svg>
   );
 }
 
-function MiniTrend() {
+function AreaTrendChart({
+  className,
+  series,
+  threshold,
+  tone,
+}: {
+  className?: string;
+  series: TrendPoint[];
+  threshold?: number;
+  tone: MetricTone;
+}) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const width = 420;
+  const height = 180;
+  const padding = 18;
+  const normalized = normalizeTrendSeries(series);
+  const points = getChartPoints(normalized, width, height, padding, threshold);
+  const linePath = pointsToPath(points);
+  const areaPath = `${linePath} L ${width - padding},${height - padding} L ${padding},${height - padding} Z`;
+  const activeIndex = hoverIndex ?? normalized.length - 1;
+  const activePoint = points[activeIndex];
+  const activeData = normalized[activeIndex];
+  const color = getToneColor(tone);
+
+  function handleMouseMove(event: ReactMouseEvent<SVGSVGElement>) {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || normalized.length <= 1) return;
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    setHoverIndex(Math.round(ratio * (normalized.length - 1)));
+  }
+
   return (
-    <svg className="h-8 w-20" viewBox="0 0 80 28" aria-hidden="true">
-      <polyline
-        points="0,22 8,21 16,9 24,18 32,5 40,22 48,16 56,20 64,8 72,17 80,14"
-        fill="none"
-        stroke="#ef4444"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className={`relative rounded-lg bg-slate-50 p-3 ${className || ""}`}>
+      <svg
+        ref={svgRef}
+        className="h-full w-full"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="风险趋势图"
+        onMouseLeave={() => setHoverIndex(null)}
+        onMouseMove={handleMouseMove}
+      >
+        {[0.25, 0.5, 0.75].map((ratio) => (
+          <line key={ratio} x1={padding} x2={width - padding} y1={height * ratio} y2={height * ratio} stroke="#dbeafe" strokeDasharray="4 4" />
+        ))}
+        {threshold !== undefined && (
+          <line
+            x1={padding}
+            x2={width - padding}
+            y1={getThresholdY(normalized, height, padding, threshold)}
+            y2={getThresholdY(normalized, height, padding, threshold)}
+            stroke="#f97316"
+            strokeDasharray="5 5"
+          />
+        )}
+        <path d={areaPath} fill={color} opacity="0.12" />
+        <path d={linePath} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        {activePoint && (
+          <>
+            <line x1={activePoint.x} x2={activePoint.x} y1={padding} y2={height - padding} stroke="#bfdbfe" strokeDasharray="3 4" />
+            <circle cx={activePoint.x} cy={activePoint.y} r="4.5" fill={color} stroke="#fff" strokeWidth="2" />
+          </>
+        )}
+      </svg>
+      {activePoint && activeData && (
+        <div
+          className="pointer-events-none absolute top-4 rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-lg"
+          style={{ left: `${Math.min(78, Math.max(4, (activePoint.x / width) * 100))}%` }}
+        >
+          <p className="font-bold text-slate-900">{activeData.label}</p>
+          <p className="mt-1 text-blue-700">当前值 {activeData.value}</p>
+          {activeData.meta && Object.entries(activeData.meta).slice(0, 3).map(([key, value]) => (
+            <p key={key} className="mt-0.5">{key}: {value}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MultiLineTrendChart({
+  className,
+  seriesSets,
+}: {
+  className?: string;
+  seriesSets: Array<{ color: string; label: string; points: TrendPoint[] }>;
+}) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const width = 420;
+  const height = 180;
+  const padding = 18;
+  const allValues = seriesSets.flatMap((set) => set.points.map((point) => point.value));
+  const domain = getValueDomain(allValues, undefined);
+  const lineSets = seriesSets.map((set) => {
+    const normalized = normalizeTrendSeries(set.points);
+    return {
+      ...set,
+      normalized,
+      points: getChartPoints(normalized, width, height, padding, undefined, domain),
+    };
+  });
+  const baseLength = Math.max(...lineSets.map((set) => set.normalized.length), 1);
+  const activeIndex = Math.min(hoverIndex ?? baseLength - 1, baseLength - 1);
+  const firstPoint = lineSets[0]?.points[activeIndex];
+
+  function handleMouseMove(event: ReactMouseEvent<SVGSVGElement>) {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || baseLength <= 1) return;
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    setHoverIndex(Math.round(ratio * (baseLength - 1)));
+  }
+
+  return (
+    <div className={`relative rounded-lg bg-slate-50 p-3 ${className || ""}`}>
+      <svg
+        ref={svgRef}
+        className="h-full w-full"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="币种风险对比趋势图"
+        onMouseLeave={() => setHoverIndex(null)}
+        onMouseMove={handleMouseMove}
+      >
+        {[0.25, 0.5, 0.75].map((ratio) => (
+          <line key={ratio} x1={padding} x2={width - padding} y1={height * ratio} y2={height * ratio} stroke="#dbeafe" strokeDasharray="4 4" />
+        ))}
+        {lineSets.map((set) => (
+          <path
+            key={set.label}
+            d={pointsToPath(set.points)}
+            fill="none"
+            stroke={set.color}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="3"
+          />
+        ))}
+        {firstPoint && <line x1={firstPoint.x} x2={firstPoint.x} y1={padding} y2={height - padding} stroke="#bfdbfe" strokeDasharray="3 4" />}
+      </svg>
+      {firstPoint && (
+        <div
+          className="pointer-events-none absolute top-4 rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-lg"
+          style={{ left: `${Math.min(78, Math.max(4, (firstPoint.x / width) * 100))}%` }}
+        >
+          <p className="font-bold text-slate-900">{lineSets[0]?.normalized[activeIndex]?.label || "趋势点"}</p>
+          {lineSets.map((set) => (
+            <p key={set.label} className="mt-1" style={{ color: set.color }}>
+              {set.label}: {set.normalized[activeIndex]?.value ?? "--"}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -3459,10 +5228,52 @@ function getPageMeta(view: ActiveView) {
     portfolio: ["我的风险资产", "Portfolio Risk Radar 个性化资产风险监控"],
     sim: ["模拟交易盘", "基于最近 7 天 15 分钟 K 线的现货模拟回放"],
     reports: ["分析报告", "查看、管理与导出风险分析结果报告"],
+    favoriteNews: ["收藏新闻", "个人风险情报收藏库"],
+    favoriteReports: ["收藏报告", "已收藏的 Agent 风控研判档案"],
+    my: ["我的", "用户中心与收藏入口"],
     settings: ["系统设置", "Agent 运行状态与新闻更新"],
   } satisfies Record<ActiveView, [string, string]>;
 
   return { title: map[view][0], subtitle: map[view][1] };
+}
+
+function favoriteString(favorite: FavoriteItem, key: string, fallback = "") {
+  const value = favorite.payload[key];
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function favoriteNumber(favorite: FavoriteItem, key: string) {
+  const value = favorite.payload[key];
+  return typeof value === "number" ? clampScore(value) : 0;
+}
+
+function favoriteStringArray(favorite: FavoriteItem, key: string) {
+  const value = favorite.payload[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
+function favoriteRecord(favorite: FavoriteItem, key: string) {
+  const value = favorite.payload[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function buildFavoriteNewsAnalysisInput(favorite: FavoriteItem) {
+  const content = favoriteString(favorite, "content", favoriteString(favorite, "summary", favorite.title));
+  return buildNewsAnalysisInput({
+    title: favorite.title,
+    content,
+    published_at: favoriteString(favorite, "published_at", favorite.created_at),
+    date: favorite.created_at,
+    risk_type: favoriteString(favorite, "risk_type", "综合风险"),
+    risk_level: favoriteString(favorite, "risk_level", "未标记"),
+    risk_score: favoriteNumber(favorite, "risk_score"),
+    coins: favoriteStringArray(favorite, "coins"),
+    summary: favoriteString(favorite, "summary", ""),
+    evidence: favoriteString(favorite, "evidence", ""),
+    source_url: favoriteString(favorite, "source_url", ""),
+  });
 }
 
 function buildReportTitle(input: string, report: RiskReport): string {
@@ -3481,11 +5292,285 @@ function formatTimestamp(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function buildNewsTrendBuckets(items: NewsRankingItem[], range: RankingRange): NewsTrendBucket[] {
+  const count = range === "24h" ? 12 : 7;
+  const stepMs = range === "24h" ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const timestamps = items.map(newsTimeValue).filter((value) => value > 0);
+  const end = timestamps.length ? Math.max(...timestamps) : Date.now();
+  const start = end - stepMs * (count - 1);
+  const sums = Array.from({ length: count }, () => 0);
+  const totals = Array.from({ length: count }, () => 0);
+  const highCounts = Array.from({ length: count }, () => 0);
+  const redCounts = Array.from({ length: count }, () => 0);
+
+  items.forEach((item) => {
+    const timestamp = newsTimeValue(item) || end;
+    const index = Math.max(0, Math.min(count - 1, Math.floor((timestamp - start) / stepMs)));
+    const score = clampScore(item.risk_score);
+    sums[index] += score;
+    totals[index] += 1;
+    if (isHighRiskNews(item)) highCounts[index] += 1;
+    if (isRedAlertNews(item)) redCounts[index] += 1;
+  });
+
+  let previousAverage = items.length ? getAverageRiskScore(items) : 0;
+  return Array.from({ length: count }, (_, index) => {
+    const timestamp = start + index * stepMs;
+    const avgScore = totals[index] ? Math.round(sums[index] / totals[index]) : previousAverage;
+    previousAverage = avgScore || previousAverage;
+    return {
+      avgScore,
+      highCount: highCounts[index],
+      label: formatTrendLabel(timestamp, range),
+      newsCount: totals[index],
+      redCount: redCounts[index],
+      timestamp,
+    };
+  });
+}
+
+function buildCoinTrendSeries(item: CoinRankingItem, range: RankingRange): TrendPoint[] {
+  const count = range === "24h" ? 12 : 7;
+  const stepMs = range === "24h" ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const related = item.related_news || [];
+  const timestamps = related.map((news) => parseLooseTimestamp(news.published_at)).filter((value) => value > 0);
+  const end = timestamps.length ? Math.max(...timestamps) : Date.now();
+  const start = end - stepMs * (count - 1);
+  const sums = Array.from({ length: count }, () => 0);
+  const totals = Array.from({ length: count }, () => 0);
+
+  related.forEach((news) => {
+    const timestamp = parseLooseTimestamp(news.published_at) || end;
+    const index = Math.max(0, Math.min(count - 1, Math.floor((timestamp - start) / stepMs)));
+    sums[index] += clampScore(news.risk_score);
+    totals[index] += 1;
+  });
+
+  if (!related.length || totals.every((value) => value === 0)) {
+    return buildFallbackTrendSeries(clampScore(item.final_score), range);
+  }
+
+  let previous = clampScore(item.final_score);
+  return Array.from({ length: count }, (_, index) => {
+    const timestamp = start + index * stepMs;
+    const value = totals[index] ? Math.round(sums[index] / totals[index]) : previous;
+    previous = value;
+    return {
+      label: formatTrendLabel(timestamp, range),
+      value,
+      timestamp,
+      meta: { 相关新闻: totals[index] },
+    };
+  });
+}
+
+function buildFallbackTrendSeries(score: number, range: RankingRange = "7d"): TrendPoint[] {
+  const count = range === "24h" ? 12 : 7;
+  const stepMs = range === "24h" ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const end = Date.now();
+  const safeScore = clampScore(score || 40);
+  return Array.from({ length: count }, (_, index) => {
+    const offset = Math.round(Math.sin((index + 1) * 1.4) * 5 + (index - count + 1) * 0.8);
+    const timestamp = end - (count - index - 1) * stepMs;
+    return {
+      label: formatTrendLabel(timestamp, range),
+      value: clampScore(safeScore + offset),
+      timestamp,
+    };
+  });
+}
+
+function buildFlatTrendSeries(value: number, range: RankingRange = "7d"): TrendPoint[] {
+  const count = range === "24h" ? 12 : 7;
+  const stepMs = range === "24h" ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const end = Date.now();
+  return Array.from({ length: count }, (_, index) => {
+    const timestamp = end - (count - index - 1) * stepMs;
+    return {
+      label: formatTrendLabel(timestamp, range),
+      value,
+      timestamp,
+    };
+  });
+}
+
+function buildCoinAggregateTrendSeries(
+  items: CoinRankingItem[],
+  range: RankingRange,
+  metric: "avg_score" | "high_count" | "news_count"
+): TrendPoint[] {
+  if (!items.length) return buildFlatTrendSeries(0, range);
+  const perCoin = items.map((item) => buildCoinTrendSeries(item, range));
+  const length = perCoin[0]?.length || (range === "24h" ? 12 : 7);
+  return Array.from({ length }, (_, index) => {
+    const points = perCoin.map((series) => series[index]).filter(Boolean);
+    const timestamp = points[0]?.timestamp || Date.now();
+    const value = (() => {
+      if (metric === "avg_score") {
+        return Math.round(points.reduce((sum, point) => sum + point.value, 0) / Math.max(points.length, 1));
+      }
+      if (metric === "high_count") {
+        return points.filter((point) => point.value >= 80).length;
+      }
+      return points.reduce((sum, point) => sum + Number(point.meta?.相关新闻 || 0), 0);
+    })();
+    return {
+      label: points[0]?.label || formatTrendLabel(timestamp, range),
+      value,
+      timestamp,
+    };
+  });
+}
+
+function getMetricDelta(series: TrendPoint[]) {
+  const normalized = normalizeTrendSeries(series);
+  const latest = normalized[normalized.length - 1]?.value || 0;
+  const previous = normalized[normalized.length - 2]?.value || 0;
+  const delta = latest - previous;
+  const percent = previous ? (delta / previous) * 100 : 0;
+  return {
+    delta: `${delta >= 0 ? "+" : ""}${delta}`,
+    deltaPercent: previous ? `${delta >= 0 ? "+" : ""}${percent.toFixed(1)}%` : "—",
+    deltaTone: delta > 0 ? "up" as const : delta < 0 ? "down" as const : "neutral" as const,
+  };
+}
+
+function deltaTextClass(tone: "up" | "down" | "neutral") {
+  if (tone === "up") return "text-emerald-600";
+  if (tone === "down") return "text-red-600";
+  return "text-slate-500";
+}
+
+function getNewsCategoryOptions(items: NewsRankingItem[]) {
+  return Array.from(new Set(items.map((item) => normalizeRiskType(item.risk_type)).filter(Boolean))).slice(0, 12);
+}
+
+function normalizeRiskType(value: string) {
+  return (value || "综合风险").replace(/\s+/g, "").replace(/[｜|]/g, "/") || "综合风险";
+}
+
+function getCoinRiskSources(item: CoinRankingItem) {
+  const rawSources = [
+    item.main_risk_type,
+    ...(item.related_news || []).map((news) => news.risk_type),
+  ]
+    .join("/")
+    .split(/[\/、,，|｜]/)
+    .map((value) => mapRiskSource(value.trim()))
+    .filter(Boolean);
+  const unique = Array.from(new Set(rawSources));
+  return unique.length ? unique.slice(0, 3) : ["综合风险"];
+}
+
+function mapRiskSource(value: string) {
+  if (!value) return "";
+  if (/监管|政策|制裁/.test(value)) return "监管";
+  if (/漏洞|攻击|合约|安全|链上/.test(value)) return "合约安全";
+  if (/交易所|提现|下架|平台/.test(value)) return "交易所";
+  if (/清算|波动|价格|暴跌|行情/.test(value)) return "异常波动";
+  if (/舆情|社区|传闻|社媒/.test(value)) return "社区舆情";
+  if (/流动性|脱锚|挤兑|储备/.test(value)) return "流动性";
+  if (/项目|跑路|团队|代币/.test(value)) return "项目方";
+  return value.slice(0, 8);
+}
+
+function getCoinKeyEvent(item: CoinRankingItem) {
+  const topRelated = [...(item.related_news || [])].sort((a, b) => clampScore(b.risk_score) - clampScore(a.risk_score))[0];
+  return topRelated?.title || item.top_news_title || item.summary || "暂无关键事件";
+}
+
+function getToneColor(tone: MetricTone) {
+  return {
+    blue: "#2563eb",
+    red: "#dc2626",
+    orange: "#f97316",
+    green: "#10b981",
+    purple: "#7c3aed",
+  }[tone];
+}
+
+function getRiskTone(score: number): MetricTone {
+  const value = clampScore(score);
+  if (value >= 80) return "red";
+  if (value >= 60) return "orange";
+  if (value < 35) return "green";
+  return "blue";
+}
+
+function normalizeTrendSeries(series: TrendPoint[]) {
+  if (series.length >= 2) return series;
+  if (series.length === 1) {
+    return [
+      { ...series[0], label: `${series[0].label}-前` },
+      series[0],
+    ];
+  }
+  return buildFallbackTrendSeries(40);
+}
+
+function getChartPoints(
+  series: TrendPoint[],
+  width: number,
+  height: number,
+  padding: number,
+  threshold?: number,
+  domain?: { min: number; max: number }
+) {
+  const normalized = normalizeTrendSeries(series);
+  const valueDomain = domain || getValueDomain(normalized.map((point) => point.value), threshold);
+  const range = Math.max(1, valueDomain.max - valueDomain.min);
+  return normalized.map((point, index) => {
+    const x = padding + (index / Math.max(1, normalized.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((point.value - valueDomain.min) / range) * (height - padding * 2);
+    return { x, y };
+  });
+}
+
+function getValueDomain(values: number[], threshold?: number) {
+  const allValues = threshold === undefined ? values : [...values, threshold];
+  if (!allValues.length) return { min: 0, max: 100 };
+  const minValue = Math.min(...allValues, 0);
+  const maxValue = Math.max(...allValues, 10);
+  if (minValue === maxValue) {
+    return { min: Math.max(0, minValue - 10), max: maxValue + 10 };
+  }
+  const padding = Math.max(4, Math.round((maxValue - minValue) * 0.12));
+  return {
+    min: Math.max(0, minValue - padding),
+    max: Math.min(100, maxValue + padding),
+  };
+}
+
+function pointsToPath(points: Array<{ x: number; y: number }>) {
+  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x},${point.y}`).join(" ");
+}
+
+function getThresholdY(series: TrendPoint[], height: number, padding: number, threshold: number) {
+  const domain = getValueDomain(series.map((point) => point.value), threshold);
+  const range = Math.max(1, domain.max - domain.min);
+  return height - padding - ((threshold - domain.min) / range) * (height - padding * 2);
+}
+
+function formatTrendLabel(timestamp: number, range: RankingRange) {
+  const date = new Date(timestamp);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  if (range === "24h") return `${pad(date.getHours())}:00`;
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function parseLooseTimestamp(value: string) {
+  if (!value) return 0;
+  const normalized = value.includes("T") ? value : value.replace(/-/g, "/");
+  const timestamp = Date.parse(normalized);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
 function getVisibleNewsItems(items: NewsRankingItem[], filter: NewsFilter, sort: NewsSort) {
   const filtered = items.filter((item) => {
     if (filter === "all" || filter === "top10") return true;
     if (filter === "high") return isHighRiskNews(item);
     if (filter === "medium") return isMediumRiskNews(item);
+    if (filter === "red") return isRedAlertNews(item);
     return isLowRiskNews(item);
   });
 
@@ -3553,10 +5638,7 @@ function getAverageCoinRiskScore(items: CoinRankingItem[]) {
 }
 
 function getRedAlertCount(items: NewsRankingItem[]) {
-  return items.filter((item) => {
-    const level = item.risk_level || "";
-    return level.includes("红") || clampScore(item.risk_score) >= 90;
-  }).length;
+  return items.filter(isRedAlertNews).length;
 }
 
 function compareNews(a: NewsRankingItem, b: NewsRankingItem, sort: NewsSort) {
@@ -3649,7 +5731,7 @@ function scrollStorageKey(path: string) {
 }
 
 function isNewsFilter(value: string): value is NewsFilter {
-  return ["all", "top10", "high", "medium", "low"].includes(value);
+  return ["all", "top10", "high", "medium", "low", "red"].includes(value);
 }
 
 function isNewsSort(value: string): value is NewsSort {
@@ -3679,6 +5761,11 @@ function isHighRiskNews(item: NewsRankingItem) {
   const level = item.risk_level || "";
   if (level.includes("中高")) return false;
   return level.includes("高") || level.includes("红") || clampScore(item.risk_score) >= 80;
+}
+
+function isRedAlertNews(item: NewsRankingItem) {
+  const level = item.risk_level || "";
+  return level.includes("红") || clampScore(item.risk_score) >= 90;
 }
 
 function isMediumRiskNews(item: NewsRankingItem) {
@@ -3711,8 +5798,8 @@ function isLowRiskCoin(item: CoinRankingItem) {
 
 function newsTimeValue(item: NewsRankingItem) {
   const value = item.published_at || "";
-  const timestamp = Date.parse(value);
-  if (!Number.isNaN(timestamp)) return timestamp;
+  const timestamp = parseLooseTimestamp(value);
+  if (timestamp) return timestamp;
 
   const timeMatch = value.match(/(\d{1,2}):(\d{2})/);
   if (!timeMatch) return 0;
@@ -3791,7 +5878,10 @@ function buildBriefAnalysis(record: AnalysisRecord) {
   const report = record.report;
   const categories = report.risk_categories?.length ? report.risk_categories.join(" / ") : "综合风险";
   const summary = compactReportSummary(report.summary) || "事件已完成结构化风险研判";
-  const signals = report.risk_signals?.map(compactReportSummary).filter(Boolean).slice(0, 2).join("、");
+  const isLowRiskPath = isLowRiskBriefReport(report);
+  const signals = isLowRiskPath
+    ? ""
+    : report.risk_signals?.map((signal) => formatRiskSignalLabel(String(signal))).filter(Boolean).slice(0, 2).join("、");
   const lowRiskGate = (report.low_risk_gate || report.chat_agent_result?.low_risk_gate || {}) as Record<string, unknown>;
   const lowRiskGateText = formatLowRiskGateBrief(lowRiskGate);
   const advice = sanitizeAdvice(report.advice || []).slice(0, 2).join("；");
@@ -3800,9 +5890,17 @@ function buildBriefAnalysis(record: AnalysisRecord) {
     `${summary}。`,
     `风险 ${clampScore(report.risk_score)}/100（${report.risk_level || "待确认"}），置信度 ${clampScore(report.confidence_score ?? 0)}/100。`,
     lowRiskGateText,
-    signals ? `关键信号：${signals}。` : `类别：${categories}。`,
+    isLowRiskPath ? "" : (signals ? `关键信号：${signals}。` : `类别：${categories}。`),
     advice ? `建议：${advice}。` : "",
   ].filter(Boolean).join("\n");
+}
+
+function isLowRiskBriefReport(report: RiskReport) {
+  const result = report.chat_agent_result || report.v6_result || {};
+  return report.risk_status === "low_risk"
+    || report.report_mode === "fast_exit"
+    || result.report_mode === "fast_exit"
+    || (clampScore(report.risk_score) <= 20 && report.risk_signals?.some((signal) => ["weak_rule_signal", "fast_exit"].includes(String(signal))));
 }
 
 function formatLowRiskGateBrief(gate: Record<string, unknown>) {
@@ -3811,10 +5909,10 @@ function formatLowRiskGateBrief(gate: Record<string, unknown>) {
   const confirmed = Boolean(gate.low_risk_confirmed);
   const reason = compactReportSummary(String(gate.reason || ""));
   const status = escalated
-    ? "低风险门控：已升级进入深度分析"
+    ? "复核结果：已升级进入深度分析"
     : confirmed
-      ? "低风险门控：已复核，未升级"
-      : "低风险门控：已复核";
+      ? "复核结果：已复核，未升级"
+      : "复核结果：已复核";
   return `${status}${reason ? `（${reason}）` : ""}。`;
 }
 
@@ -3831,6 +5929,12 @@ function getMetrics(
   const averageRiskScore = getAverageRiskScore(newsItems);
   const redAlertCount = getRedAlertCount(newsItems);
   const newsTotal = newsItems.length || overview?.total_news || 0;
+  const newsBuckets = buildNewsTrendBuckets(newsItems, "7d");
+  const newsTotalSeries = newsBuckets.map((bucket) => ({ label: bucket.label, value: bucket.newsCount, timestamp: bucket.timestamp }));
+  const highNewsSeries = newsBuckets.map((bucket) => ({ label: bucket.label, value: bucket.highCount, timestamp: bucket.timestamp }));
+  const averageNewsSeries = newsBuckets.map((bucket) => ({ label: bucket.label, value: bucket.avgScore, timestamp: bucket.timestamp }));
+  const redAlertSeries = newsBuckets.map((bucket) => ({ label: bucket.label, value: bucket.redCount, timestamp: bucket.timestamp }));
+  const metricDelta = (series: TrendPoint[]) => getMetricDelta(series);
 
   if (view === "chat") {
     return [
@@ -3854,27 +5958,31 @@ function getMetrics(
     const coinDistribution = getCoinDistribution(coinItems);
     const averageCoinRiskScore = getAverageCoinRiskScore(coinItems);
     const coinNewsCount = coinItems.reduce((sum, item) => sum + (item.news_count || 0), 0);
+    const coinTotalSeries = buildFlatTrendSeries(coinItems.length, "7d");
+    const highCoinSeries = buildCoinAggregateTrendSeries(coinItems, "7d", "high_count");
+    const averageCoinSeries = buildCoinAggregateTrendSeries(coinItems, "7d", "avg_score");
+    const coinNewsSeries = buildCoinAggregateTrendSeries(coinItems, "7d", "news_count");
     return [
-      { label: "监测币种总数", value: loading ? "--" : String(coinItems.length), delta: "实时数据", tone: "blue" as const, icon: <CoinIcon /> },
-      { label: "高风险币种", value: loading ? "--" : String(coinDistribution.high), delta: "实时数据", tone: "red" as const, icon: <AlertIcon /> },
-      { label: "平均币种风险分", value: loading ? "--" : String(averageCoinRiskScore), delta: "实时数据", tone: "blue" as const, icon: <TrendIcon /> },
-      { label: "关联新闻数", value: loading ? "--" : String(coinNewsCount), delta: "实时聚合", tone: "orange" as const, icon: <FileIcon /> },
+      { label: "监测币种总数", value: loading ? "--" : String(coinItems.length), tone: "blue" as const, icon: <CoinIcon />, series: coinTotalSeries, ...metricDelta(coinTotalSeries) },
+      { label: "高风险币种", value: loading ? "--" : String(coinDistribution.high), tone: "red" as const, icon: <AlertIcon />, series: highCoinSeries, ...metricDelta(highCoinSeries) },
+      { label: "平均币种风险分", value: loading ? "--" : String(averageCoinRiskScore), tone: "blue" as const, icon: <TrendIcon />, series: averageCoinSeries, ...metricDelta(averageCoinSeries) },
+      { label: "关联新闻数", value: loading ? "--" : String(coinNewsCount), tone: "orange" as const, icon: <FileIcon />, series: coinNewsSeries, ...metricDelta(coinNewsSeries) },
     ];
   }
 
   if (view === "news") {
     return [
-      { label: "监测新闻总数", value: loading ? "--" : String(newsTotal), delta: "实时数据", tone: "blue" as const, icon: <FileIcon /> },
-      { label: "高风险新闻", value: loading ? "--" : String(distribution.high), delta: "实时数据", tone: "red" as const, icon: <AlertIcon /> },
-      { label: "平均风险分", value: loading ? "--" : String(averageRiskScore), delta: "实时数据", tone: "blue" as const, icon: <TrendIcon /> },
-      { label: "红色预警事件", value: loading ? "--" : String(redAlertCount), delta: "实时数据", tone: "orange" as const, icon: <ShieldIcon /> },
+      { label: "监测新闻总数", value: loading ? "--" : String(newsTotal), tone: "blue" as const, icon: <FileIcon />, series: newsTotalSeries, ...metricDelta(newsTotalSeries) },
+      { label: "高风险新闻", value: loading ? "--" : String(distribution.high), tone: "red" as const, icon: <AlertIcon />, series: highNewsSeries, ...metricDelta(highNewsSeries) },
+      { label: "平均风险分", value: loading ? "--" : String(averageRiskScore), tone: "blue" as const, icon: <TrendIcon />, series: averageNewsSeries, ...metricDelta(averageNewsSeries) },
+      { label: "红色预警事件", value: loading ? "--" : String(redAlertCount), tone: "orange" as const, icon: <ShieldIcon />, series: redAlertSeries, ...metricDelta(redAlertSeries) },
     ];
   }
 
   return [
-    { label: "今日高风险新闻", value: loading ? "--" : String(distribution.high || overview?.high_risk_news || (topNews.risk_score > 80 ? 1 : 0)), delta: "实时数据", tone: "red" as const, icon: <FileIcon /> },
-    { label: "红色预警事件", value: loading ? "--" : String(redAlertCount), delta: "实时数据", tone: "orange" as const, icon: <ShieldIcon /> },
-    { label: "平均风险分", value: loading ? "--" : String(averageRiskScore), delta: "实时数据", tone: "blue" as const, icon: <TrendIcon /> },
+    { label: "今日高风险新闻", value: loading ? "--" : String(distribution.high || overview?.high_risk_news || (topNews.risk_score > 80 ? 1 : 0)), tone: "red" as const, icon: <FileIcon />, series: highNewsSeries, ...metricDelta(highNewsSeries) },
+    { label: "红色预警事件", value: loading ? "--" : String(redAlertCount), tone: "orange" as const, icon: <ShieldIcon />, series: redAlertSeries, ...metricDelta(redAlertSeries) },
+    { label: "平均风险分", value: loading ? "--" : String(averageRiskScore), tone: "blue" as const, icon: <TrendIcon />, series: averageNewsSeries, ...metricDelta(averageNewsSeries) },
     { label: "实时监测状态", value: "运行中", delta: "所有 Agent 正常", tone: "green" as const, icon: <SmileIcon /> },
   ];
 }
@@ -3915,6 +6023,7 @@ function TradeIcon() { return <IconSvg><path d="M4 17h16" /><path d="M7 14l3-4 3
 function PortfolioIcon() { return <IconSvg><path d="M4 19V5" /><path d="M4 19h16" /><path d="M7 15l3-3 3 2 5-7" /><circle cx="18" cy="7" r="2" /></IconSvg>; }
 function CoinIcon() { return <IconSvg><circle cx="12" cy="12" r="8" /><path d="M9 10h6" /><path d="M9 14h6" /></IconSvg>; }
 function FileIcon() { return <IconSvg><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h6" /></IconSvg>; }
+function UserIcon() { return <IconSvg><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></IconSvg>; }
 function GearIcon() { return <IconSvg><circle cx="12" cy="12" r="3" /><path d="M19.4 15a8 8 0 0 0 .1-2l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L15 5.5h-4l-.4 2.6a8 8 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a8 8 0 0 0 .1 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.7 1l.4 2.6h4l.4-2.6a8 8 0 0 0 1.7-1l2.4 1 2-3.4z" /></IconSvg>; }
 function ShieldIcon() { return <IconSvg><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6z" /><path d="m9 12 2 2 4-5" /></IconSvg>; }
 function AlertIcon() { return <IconSvg><path d="m12 3 10 18H2z" /><path d="M12 9v5" /><path d="M12 18h.01" /></IconSvg>; }
@@ -3932,5 +6041,13 @@ function ChevronLeftIcon() { return <IconSvg><path d="m15 18-6-6 6-6" /></IconSv
 function ChevronRightIcon() { return <IconSvg><path d="m9 18 6-6-6-6" /></IconSvg>; }
 function ChevronDownIcon() { return <IconSvg><path d="m6 9 6 6 6-6" /></IconSvg>; }
 function ChevronUpIcon() { return <IconSvg><path d="m18 15-6-6-6 6" /></IconSvg>; }
+function CloseIcon() { return <IconSvg><path d="M18 6 6 18" /><path d="m6 6 12 12" /></IconSvg>; }
+function StarIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z" />
+    </svg>
+  );
+}
 function TrashIcon() { return <IconSvg><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M6 7l1 14h10l1-14" /><path d="M9 7V4h6v3" /></IconSvg>; }
 function RefreshIcon() { return <IconSvg><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v6h-6" /></IconSvg>; }

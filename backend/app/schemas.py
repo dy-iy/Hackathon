@@ -128,12 +128,26 @@ class ChatResponse(BaseModel):
 
 class RiskAssistantRequest(BaseModel):
     question: str | None = Field(default=None, description="User question for risk assistant")
+    analysis_mode: str | None = Field(default="general_qa", description="Risk assistant mode")
+    context_type: str | None = Field(default=None, description="Typed context source")
     selected_text: str | None = Field(default=None, description="Quoted page selection")
     user_question: str | None = Field(default=None, description="Question typed after quoting selected text")
+    page_context: "PageContext | None" = None
+    use_portfolio_context: bool = False
     context: dict[str, object] = Field(default_factory=dict)
+
+
+class PageContext(BaseModel):
+    path: str | None = None
+    page_type: str | None = None
+    news_id: str | None = None
+    symbol: str | None = None
+    title: str | None = None
+    raw_context: dict[str, object] = Field(default_factory=dict)
 
 
 class RiskAssistantResponse(BaseModel):
     status: str = "success"
     message: str = "回答完成"
-    answer: str
+    answer: str = ""
+    analysis_mode: str = "general_qa"

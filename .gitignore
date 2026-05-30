@@ -61,6 +61,8 @@ backend/app/data/saved_news/
 backend/app/data/temp_*.csv
 backend/app/data/*.tmp
 backend/app/data/*.bak
+backend/app/data/auth.sqlite3
+backend/app/data/auth.sqlite3-*
 
 # Tooling caches
 .cache/

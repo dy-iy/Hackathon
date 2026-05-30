@@ -178,7 +178,7 @@ def save_scored_news(items: list[dict[str, object]], path_value: str | None = No
 def clear_raw_news_queue(path_value: str | None = None) -> None:
     path = Path(path_value) if path_value else RAW_NEWS_QUEUE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = "新闻id,时间,内容\n"
+    header = "新闻id,时间,标题,内容,链接\n"
 
     if path.exists():
         for encoding in ["utf-8-sig", "utf-8", "gbk"]:

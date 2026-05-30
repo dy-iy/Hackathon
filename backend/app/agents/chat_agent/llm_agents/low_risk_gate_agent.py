@@ -31,7 +31,7 @@ def _normalize_risk_type(value: object) -> str:
     return ""
 
 
-def _normalize_added_types(raw_value: object) -> list[str]:
+def _normalize_risk_types(raw_value: object) -> list[str]:
     if not isinstance(raw_value, list):
         return []
     normalized: list[str] = []
@@ -65,14 +65,31 @@ def _normalize_scores(raw_value: object, added_types: list[str]) -> dict[str, in
     return scores
 
 
-def review_low_risk_route(case_input: RiskCaseInput, signal_scan: SignalScanResult) -> tuple[SignalScanResult, dict[str, Any], list[str]]:
-    raw_result = call_llm_json(build_low_risk_gate_prompt(case_input, signal_scan), temperature=0.0)
+def _rebuild_scenario_scores(raw_scores: dict[str, float]) -> dict[str, float]:
+    scenario_scores: dict[str, float] = {}
+    for risk_type, score in raw_scores.items():
+        scenario = RISK_SCENARIO_MAP.get(risk_type)
+        if not scenario:
+            continue
+        scenario_scores[scenario] = max(float(scenario_scores.get(scenario, 0.0)), float(score))
+    return scenario_scores
+
+
+def review_low_risk_route(
+    case_input: RiskCaseInput,
+    signal_scan: SignalScanResult,
+    current_path: str = "fast_exit",
+) -> tuple[SignalScanResult, dict[str, Any], list[str]]:
+    prompt_route = "low_risk_path" if current_path == "fast_exit" else "deep_analysis_path"
+    raw_result = call_llm_json(build_low_risk_gate_prompt(case_input, signal_scan, prompt_route), temperature=0.0)
     if raw_result.get("_llm_error"):
         gate = {
             "source": "llm_error_fallback",
             "low_risk_confirmed": True,
             "escalate_to_high_risk": False,
+            "confirmed_risk_types": [],
             "added_risk_types": [],
+            "suppressed_risk_types": [],
             "corrected_scores": {},
             "reason": str(raw_result["_llm_error"]),
             "raw_llm_output": raw_result,
@@ -80,14 +97,41 @@ def review_low_risk_route(case_input: RiskCaseInput, signal_scan: SignalScanResu
         updated_debug = {**signal_scan.debug, "low_risk_gate": gate}
         return signal_scan.model_copy(update={"debug": updated_debug}), gate, []
 
-    added_types = _normalize_added_types(raw_result.get("added_risk_types"))
-    corrected_scores = _normalize_scores(raw_result.get("corrected_scores"), added_types)
+    confirmed_types = _normalize_risk_types(raw_result.get("confirmed_risk_types"))
+    added_types = _normalize_risk_types(raw_result.get("added_risk_types"))
+    suppressed_types = _normalize_risk_types(raw_result.get("suppressed_risk_types"))
+    default_score_types = list(
+        dict.fromkeys(
+            added_types
+            + [
+                risk_type
+                for risk_type in confirmed_types
+                if float(signal_scan.raw_rule_scores.get(risk_type, 0.0)) <= 0
+            ]
+        )
+    )
+    corrected_scores = _normalize_scores(raw_result.get("corrected_scores"), default_score_types)
+    for risk_type in suppressed_types:
+        corrected_scores.setdefault(risk_type, 0)
     primary_type = _normalize_risk_type(raw_result.get("reviewed_primary_risk_type"))
     reviewed_score = _clamp_score(raw_result.get("reviewed_risk_score"))
     if primary_type and reviewed_score > 0:
         corrected_scores[primary_type] = max(corrected_scores.get(primary_type, 0), reviewed_score)
 
     escalate = bool(raw_result.get("escalate_to_high_risk"))
+    for risk_type in confirmed_types:
+        if risk_type in suppressed_types:
+            continue
+        if risk_type in {
+            "score_hack",
+            "score_fraud",
+            "score_outage",
+            "score_stablecoin",
+            "score_solvency",
+            "score_team",
+            "score_infra",
+        }:
+            escalate = True
     if corrected_scores:
         for risk_type, score in corrected_scores.items():
             if risk_type in {
@@ -110,13 +154,21 @@ def review_low_risk_route(case_input: RiskCaseInput, signal_scan: SignalScanResu
                 escalate = True
 
     raw_scores = dict(signal_scan.raw_rule_scores)
-    scenario_scores = dict(signal_scan.scenario_scores)
     positive_signals = list(signal_scan.positive_signals)
+    suppressed_signal_types = {SIGNAL_TYPES.get(risk_type, risk_type) for risk_type in suppressed_types}
+    if suppressed_signal_types:
+        positive_signals = [
+            signal
+            for signal in positive_signals
+            if signal.type not in suppressed_signal_types
+        ]
     for risk_type, score_100 in corrected_scores.items():
         score = round(score_100 / 100, 4)
+        if risk_type in suppressed_types:
+            raw_scores[risk_type] = min(float(raw_scores.get(risk_type, 0.0)), score)
+            continue
         raw_scores[risk_type] = max(float(raw_scores.get(risk_type, 0.0)), score)
         scenario = RISK_SCENARIO_MAP[risk_type]
-        scenario_scores[scenario] = max(float(scenario_scores.get(scenario, 0.0)), score)
         positive_signals.append(
             Signal(
                 type=SIGNAL_TYPES.get(risk_type, risk_type),
@@ -125,14 +177,17 @@ def review_low_risk_route(case_input: RiskCaseInput, signal_scan: SignalScanResu
                 reason=f"low_risk_gate:{RISK_NAME_MAP[risk_type]}",
             )
         )
+    scenario_scores = _rebuild_scenario_scores(raw_scores)
 
     gate = {
         "source": "llm",
         "low_risk_confirmed": bool(raw_result.get("low_risk_confirmed")) and not escalate,
         "escalate_to_high_risk": escalate,
+        "confirmed_risk_types": confirmed_types,
         "reviewed_primary_risk_type": primary_type,
         "reviewed_risk_score": reviewed_score,
         "added_risk_types": added_types,
+        "suppressed_risk_types": suppressed_types,
         "corrected_scores": corrected_scores,
         "reason": str(raw_result.get("reason") or ""),
         "raw_llm_output": raw_result,

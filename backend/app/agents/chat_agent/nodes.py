@@ -178,7 +178,12 @@ decision_engine_node = deterministic_decision_engine_node
 
 
 def low_risk_gate_node(state: RiskCaseState) -> RiskCaseState:
-    signal_scan, gate, active_scenarios = review_low_risk_route(state["case_input"], state["signal_scan"])
+    current_path = str(state.get("orchestration_path") or state["orchestration"].path)
+    signal_scan, gate, active_scenarios = review_low_risk_route(
+        state["case_input"],
+        state["signal_scan"],
+        current_path,
+    )
     if gate.get("escalate_to_high_risk"):
         orchestration = state["orchestration"].model_copy(
             update={
@@ -204,9 +209,10 @@ def low_risk_gate_node(state: RiskCaseState) -> RiskCaseState:
             "active_scenarios": active_scenarios,
             "initial_validation_hint": True,
         }
+    next_path = "fast_exit" if current_path == "fast_exit" else "deep_analysis"
     return {
         **state,
         "signal_scan": signal_scan,
         "low_risk_gate": gate,
-        "orchestration_path": "fast_exit",
+        "orchestration_path": next_path,
     }

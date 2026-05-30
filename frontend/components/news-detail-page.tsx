@@ -4,7 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { LoadingDots } from "@/components/ui/loading-states";
-import { fetchNewsDetail, NewsRankingItem, readCachedNewsDetail } from "@/lib/api";
+import { buildNewsAnalysisInput } from "@/lib/news-analysis";
+import {
+  addFavorite,
+  deleteFavorite,
+  fetchCurrentUser,
+  fetchFavorites,
+  fetchNewsDetail,
+  NewsRankingItem,
+  readCachedNewsDetail,
+} from "@/lib/api";
 
 export default function NewsDetailPage({
   fromCoin = "",
@@ -20,6 +29,9 @@ export default function NewsDetailPage({
   const [item, setItem] = useState<NewsRankingItem | null>(() => readCachedNewsDetail(newsId, detailRange));
   const [loading, setLoading] = useState(() => !readCachedNewsDetail(newsId, detailRange));
   const [error, setError] = useState("");
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [favoriteMessage, setFavoriteMessage] = useState("");
   const coinSymbol = fromCoin.toUpperCase();
   const coinPath = coinSymbol ? `/coins/${encodeURIComponent(coinSymbol)}` : "";
   const coinReturnHref = coinSymbol
@@ -50,10 +62,105 @@ export default function NewsDetailPage({
     };
   }, [detailRange, newsId]);
 
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadFavoriteState() {
+      try {
+        const user = await fetchCurrentUser();
+        if (!user) {
+          if (!ignore) setIsFavorite(false);
+          return;
+        }
+        const favorites = await fetchFavorites("news");
+        if (!ignore) {
+          setIsFavorite(favorites.some((favorite) => favorite.item_id === newsId));
+        }
+      } catch (favoriteError) {
+        console.error(favoriteError);
+        if (!ignore) setIsFavorite(false);
+      }
+    }
+
+    void loadFavoriteState();
+    return () => {
+      ignore = true;
+    };
+  }, [newsId]);
+
   const sourceHref = useMemo(() => {
     if (!item) return "";
     return item.source_url || `https://www.google.com/search?q=${encodeURIComponent(item.title)}`;
   }, [item]);
+
+  async function handleToggleFavorite() {
+    if (!item || favoriteLoading) return;
+    setFavoriteLoading(true);
+    setFavoriteMessage("");
+    try {
+      const user = await fetchCurrentUser();
+      if (!user) {
+        setFavoriteMessage("请先在右上角登录后再收藏新闻。");
+        return;
+      }
+      if (isFavorite) {
+        await deleteFavorite("news", String(item.news_id));
+        setIsFavorite(false);
+        setFavoriteMessage("已取消收藏。");
+      } else {
+        await addFavorite({
+          item_type: "news",
+          item_id: String(item.news_id),
+          title: item.title,
+          payload: {
+            news_id: item.news_id,
+            title: item.title,
+            content: item.content,
+            published_at: item.published_at || item.date,
+            risk_score: item.risk_score,
+            risk_level: item.risk_level,
+            risk_type: item.risk_type,
+            coins: item.coins,
+            summary: item.summary,
+            evidence: item.evidence,
+            source_url: item.source_url,
+          },
+        });
+        setIsFavorite(true);
+        setFavoriteMessage("已收藏新闻。");
+      }
+    } catch (favoriteError) {
+      console.error(favoriteError);
+      setFavoriteMessage(favoriteError instanceof Error ? favoriteError.message.replace(/^Request failed: \d+:\s*/, "") : "收藏新闻失败。");
+    } finally {
+      setFavoriteLoading(false);
+    }
+  }
+
+  function handleDeepAnalyze() {
+    if (!item) return;
+    window.dispatchEvent(new CustomEvent("cryptorisk:open-risk-assistant", {
+      detail: {
+        mode: "deep_analysis",
+        selectedText: item.content || item.summary || item.title,
+        sourceInput: buildNewsAnalysisInput(item),
+        news: {
+          news_id: item.news_id,
+          title: item.title,
+          content: item.content,
+          published_at: item.published_at,
+          date: item.date,
+          risk_score: item.risk_score,
+          risk_level: item.risk_level,
+          risk_type: item.risk_type,
+          coins: item.coins,
+          summary: item.summary,
+          evidence: item.evidence,
+          source_url: item.source_url,
+        },
+      },
+    }));
+  }
 
   return (
     <main className="risk-shell min-h-screen bg-[#f4f7fb] text-slate-900">
@@ -78,17 +185,46 @@ export default function NewsDetailPage({
             )}
           </div>
           {item && (
-            <a
-              href={sourceHref}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-200 transition-colors duration-200 hover:bg-blue-700 sm:w-auto"
-            >
-              <ExternalLinkIcon />
-              {item.source_url ? "打开原文网页" : "检索原文网页"}
-            </a>
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+              <button
+                type="button"
+                onClick={handleDeepAnalyze}
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-200 transition-colors duration-200 hover:bg-blue-700 sm:w-auto"
+              >
+                <ShieldIcon />
+                深入分析
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleFavorite}
+                disabled={favoriteLoading}
+                className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border px-4 text-sm font-bold shadow-sm transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                  isFavorite
+                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    : "border-blue-100 bg-white text-slate-700 hover:bg-blue-50"
+                }`}
+              >
+                <StarIcon filled={isFavorite} />
+                {favoriteLoading ? "处理中..." : isFavorite ? "取消收藏" : "收藏新闻"}
+              </button>
+              <a
+                href={sourceHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-bold text-blue-700 shadow-sm transition-colors duration-200 hover:bg-blue-50 sm:w-auto"
+              >
+                <ExternalLinkIcon />
+                {item.source_url ? "打开原文网页" : "检索原文网页"}
+              </a>
+            </div>
           )}
         </div>
+
+        {favoriteMessage && (
+          <div className="mb-5 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm">
+            {favoriteMessage}
+          </div>
+        )}
 
         {loading && (
           <section className="risk-card rounded-lg p-8">
@@ -112,8 +248,16 @@ export default function NewsDetailPage({
               riskLevel: item.risk_level,
               riskScore: item.risk_score,
               riskType: item.risk_type,
+              risk_level: item.risk_level,
+              risk_score: item.risk_score,
+              risk_type: item.risk_type,
               newsId: item.news_id,
+              news_id: item.news_id,
               time: item.published_at || item.date,
+              content: item.content,
+              summary: item.summary,
+              evidence: item.evidence,
+              source_url: item.source_url,
             })}
           >
             <section className="risk-card rounded-lg p-5 sm:p-7">
@@ -138,14 +282,6 @@ export default function NewsDetailPage({
               <InfoCard label="关联币种" value={formatCoins(item)} />
             </section>
 
-            <DetailSection title="新闻摘要" icon={<FileIcon />}>
-              <p>{item.summary || "暂无摘要。"}</p>
-            </DetailSection>
-
-            <DetailSection title="证据与判定依据" icon={<ShieldIcon />}>
-              <p>{item.evidence || "暂无结构化证据。"}</p>
-            </DetailSection>
-
             <DetailSection title="新闻正文" icon={<TextIcon />}>
               <p className="whitespace-pre-wrap">{item.content || "暂无正文。"}</p>
             </DetailSection>
@@ -162,6 +298,14 @@ export default function NewsDetailPage({
               ) : (
                 <p>{item.coins?.length ? item.coins.join("、") : "暂无明确关联币种。"}</p>
               )}
+            </DetailSection>
+
+            <DetailSection title="证据与判定依据" icon={<ShieldIcon />}>
+              <p>{item.evidence || "暂无结构化证据。"}</p>
+            </DetailSection>
+
+            <DetailSection title="新闻摘要" icon={<FileIcon />}>
+              <p>{item.summary || "暂无摘要。"}</p>
             </DetailSection>
           </article>
         )}
@@ -248,3 +392,10 @@ function FileIcon() { return <IconSvg><path d="M7 3h7l5 5v13H7z" /><path d="M14 
 function ShieldIcon() { return <IconSvg><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6z" /><path d="m9 12 2 2 4-5" /></IconSvg>; }
 function TextIcon() { return <IconSvg><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></IconSvg>; }
 function CoinIcon() { return <IconSvg><circle cx="12" cy="12" r="8" /><path d="M9 10h6" /><path d="M9 14h6" /></IconSvg>; }
+function StarIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z" />
+    </svg>
+  );
+}

@@ -42,7 +42,7 @@ const portfolioZoomPresets = [
   { label: "1H", candles: 4 },
   { label: "4H", candles: 16 },
   { label: "1D", candles: 96 },
-  { label: "3D", candles: 288 },
+  { label: "7D", candles: 288 },
   { label: "全部", candles: 0 },
 ] as const;
 
@@ -91,6 +91,8 @@ type PortfolioRiskEvent = {
   title: string;
 };
 
+type PortfolioChartLayer = "ma" | "volume" | "volatility" | "events" | "stop" | "levels";
+
 type PortfolioCoinCandidate = {
   name: string;
   newsCount?: number;
@@ -98,6 +100,7 @@ type PortfolioCoinCandidate = {
   score?: number;
   symbol: string;
 };
+type WatchlistSortMode = "risk" | "loss" | "value" | "volatility";
 
 type PortfolioRiskTone = {
   badge: string;
@@ -139,14 +142,14 @@ const portfolioRiskTones: Record<"low" | "medium" | "high" | "critical", Portfol
     text: "text-amber-950",
   },
   high: {
-    badge: "bg-red-600 text-white",
-    bg: "bg-red-50",
-    border: "border-red-200",
-    hover: "hover:bg-red-100",
-    marker: "#dc2626",
-    markerCluster: "#991b1b",
-    softText: "text-red-700",
-    text: "text-red-950",
+    badge: "bg-orange-600 text-white",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    hover: "hover:bg-orange-100",
+    marker: "#ea580c",
+    markerCluster: "#c2410c",
+    softText: "text-orange-700",
+    text: "text-orange-950",
   },
   critical: {
     badge: "bg-red-900 text-white",
@@ -248,7 +251,8 @@ export default function PortfolioRiskRadar() {
       try {
         const items = await fetchPortfolioWatchlist();
         if (ignore) return;
-        const nextSymbol = items[0]?.symbol || "";
+        const requestedSymbol = readRequestedPortfolioSymbol();
+        const nextSymbol = items.find((item) => item.symbol === requestedSymbol)?.symbol || items[0]?.symbol || "";
         setWatchlist(items);
         setLastUpdated(formatNow());
         setSelectedSymbol(nextSymbol);
@@ -500,6 +504,13 @@ export default function PortfolioRiskRadar() {
     ? Math.round(watchlist.reduce((sum, item) => sum + (item.risk_score || 0), 0) / watchlist.length)
     : 0;
   const highRiskCount = watchlist.filter((item) => ["high", "critical"].includes(item.risk_level)).length;
+  const warningCount = watchlist.filter((item) => item.risk_score >= item.alert_threshold || ["high", "critical"].includes(item.risk_level)).length;
+  const portfolioPnl = watchlist.reduce((sum, item) => sum + (item.floating_pnl || 0), 0);
+  const portfolioPnlRate = portfolioValue ? portfolioPnl / portfolioValue : 0;
+  const maxDrawdownAsset = [...watchlist].sort((a, b) => a.floating_pnl_rate - b.floating_pnl_rate)[0] || null;
+  const portfolioRiskLevel = inferPortfolioRiskLevel(averageRisk);
+  const portfolioHealthScore = Math.max(0, Math.min(100, Math.round(100 - averageRisk * 0.72 - highRiskCount * 4 + (portfolioPnlRate > 0 ? 4 : 0))));
+  const currentAdvice = buildPortfolioDecisionAdvice(averageRisk, highRiskCount, warningCount, portfolioPnlRate);
 
   function handlePortfolioPresetRange(preset: PortfolioZoomPreset) {
     setChartFollowMode({ candles: preset.candles, kind: "preset", label: preset.label });
@@ -596,30 +607,30 @@ export default function PortfolioRiskRadar() {
   }
 
   return (
-    <section className="space-y-5">
-      <div className="risk-card rounded-lg p-4 sm:p-5">
+    <section className="space-y-5 bg-slate-50/40">
+      <div className="rounded-lg border border-slate-200/70 bg-white/95 p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Portfolio Risk Radar</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Portfolio Risk Radar</p>
             <h1 className="mt-2 text-2xl font-bold text-slate-950 sm:text-3xl">个人资产风险雷达</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              上次更新时间：{lastUpdated || "等待刷新"} · demo_user 个性化风险监控
+              上次更新时间：{lastUpdated || "等待刷新"} · 上面看整体，中间看资产，右侧做决策
             </p>
           </div>
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <button
               type="button"
               onClick={() => setAddOpen(true)}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-white px-4 text-sm font-bold text-emerald-700 transition-colors duration-200 hover:bg-emerald-50 sm:w-auto"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition-colors duration-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 sm:w-auto"
             >
               <PlusIcon />
-              添加币种
+              添加资产
             </button>
             <button
               type="button"
               onClick={() => refreshAndReload(true)}
               disabled={refreshing}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-200 transition-colors duration-200 hover:bg-blue-700 disabled:opacity-60 sm:w-auto"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-100 transition-colors duration-200 hover:bg-blue-700 disabled:opacity-60 sm:w-auto"
             >
               <RefreshIcon />
               {refreshing ? "刷新中" : "刷新风险数据"}
@@ -627,11 +638,18 @@ export default function PortfolioRiskRadar() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <PortfolioMetric label="监控币种" value={String(watchlist.length)} />
-          <PortfolioMetric label="模拟持仓价值" value={formatUsdt(portfolioValue)} />
-          <PortfolioMetric label="高风险资产" value={`${highRiskCount} / ${averageRisk}`} helper="数量 / 平均风险分" />
-        </div>
+        <PortfolioOverviewCards
+          advice={currentAdvice}
+          highRiskCount={highRiskCount}
+          maxDrawdownAsset={maxDrawdownAsset}
+          portfolioHealthScore={portfolioHealthScore}
+          portfolioPnl={portfolioPnl}
+          portfolioPnlRate={portfolioPnlRate}
+          portfolioRiskLevel={portfolioRiskLevel}
+          portfolioValue={portfolioValue}
+          warningCount={warningCount}
+          watchlistCount={watchlist.length}
+        />
       </div>
 
       {error ? <Notice tone="red" text={error} /> : null}
@@ -641,7 +659,7 @@ export default function PortfolioRiskRadar() {
         <LoadingPanel text="正在加载个人资产风险雷达" />
       ) : watchlist.length ? (
         <>
-          <div className="grid min-w-0 gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
             <WatchlistPanel
               items={watchlist}
               onDelete={handleDeleteSymbol}
@@ -652,7 +670,7 @@ export default function PortfolioRiskRadar() {
               selectedSymbol={selectedItem?.symbol || ""}
             />
 
-            <section className="risk-panel min-w-0 rounded-lg bg-white p-3 sm:p-4">
+            <section className="min-w-0 rounded-lg border border-slate-200/70 bg-white p-3 shadow-sm sm:p-4">
               <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Market Candles</p>
@@ -679,6 +697,7 @@ export default function PortfolioRiskRadar() {
                   selectedEvent={selectedRiskEvent}
                   setRange={setChartRange}
                   tradeMarkers={tradeMarkers}
+                  watchItem={selectedItem}
                 />
               )}
               {tradeDraft ? (
@@ -771,6 +790,86 @@ function PortfolioRefreshProgress({ job }: { job: PortfolioRefreshJob | null }) 
   );
 }
 
+function PortfolioOverviewCards({
+  advice,
+  highRiskCount,
+  maxDrawdownAsset,
+  portfolioHealthScore,
+  portfolioPnl,
+  portfolioPnlRate,
+  portfolioRiskLevel,
+  portfolioValue,
+  warningCount,
+  watchlistCount,
+}: {
+  advice: string;
+  highRiskCount: number;
+  maxDrawdownAsset: PortfolioWatchlistItem | null;
+  portfolioHealthScore: number;
+  portfolioPnl: number;
+  portfolioPnlRate: number;
+  portfolioRiskLevel: PortfolioRiskLevel;
+  portfolioValue: number;
+  warningCount: number;
+  watchlistCount: number;
+}) {
+  return (
+    <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+      <PortfolioKpiCard
+        label="总资产 / 风险资产"
+        value={formatUsdt(portfolioValue)}
+        helper={`${watchlistCount} 个资产 · 高风险 ${highRiskCount} 个`}
+        tone="neutral"
+      />
+      <PortfolioKpiCard
+        label="组合健康分"
+        value={`${portfolioHealthScore} / 100`}
+        helper={`组合风险等级：${formatRiskLevel(portfolioRiskLevel)}`}
+        tone={portfolioRiskLevel}
+      />
+      <PortfolioKpiCard
+        label="今日新增预警"
+        value={`${warningCount} 条`}
+        helper={maxDrawdownAsset ? `最大回撤资产：${maxDrawdownAsset.symbol}` : "暂无回撤资产"}
+        tone={warningCount ? "medium" : "low"}
+      />
+      <PortfolioKpiCard
+        label="24h / 7d 组合盈亏"
+        value={formatUsdt(portfolioPnl)}
+        helper={`${formatPercent(portfolioPnlRate)} · 当前建议：${advice}`}
+        tone={portfolioPnl >= 0 ? "low" : "high"}
+      />
+    </div>
+  );
+}
+
+function PortfolioKpiCard({
+  helper,
+  label,
+  tone,
+  value,
+}: {
+  helper: string;
+  label: string;
+  tone: PortfolioRiskLevel | "neutral";
+  value: string;
+}) {
+  const toneStyle = {
+    critical: "border-rose-200 bg-rose-50 text-rose-700",
+    high: "border-orange-200 bg-orange-50 text-orange-700",
+    low: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    medium: "border-amber-200 bg-amber-50 text-amber-700",
+    neutral: "border-slate-200 bg-slate-50 text-blue-700",
+  }[tone];
+  return (
+    <article className={`min-h-[128px] rounded-lg border p-4 shadow-sm ${toneStyle}`}>
+      <p className="text-xs font-bold uppercase tracking-[0.14em] opacity-80">{label}</p>
+      <p className="mt-3 break-words text-2xl font-bold leading-tight text-slate-950">{value}</p>
+      <p className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-600">{helper}</p>
+    </article>
+  );
+}
+
 function WatchlistPanel({
   items,
   onDelete,
@@ -783,20 +882,36 @@ function WatchlistPanel({
   selectedSymbol: string;
 }) {
   const [deleteMode, setDeleteMode] = useState(false);
+  const [sortMode, setSortMode] = useState<WatchlistSortMode>("risk");
+  const [alertsOnly, setAlertsOnly] = useState(false);
+  const sortedItems = useMemo(() => {
+    const base = alertsOnly
+      ? items.filter((item) => item.risk_score >= item.alert_threshold || ["high", "critical"].includes(item.risk_level))
+      : items;
+    return [...base].sort((a, b) => {
+      if (sortMode === "loss") return a.floating_pnl_rate - b.floating_pnl_rate;
+      if (sortMode === "value") return (b.market_value || 0) - (a.market_value || 0);
+      if (sortMode === "volatility") return Math.abs(b.price_change_24h || 0) - Math.abs(a.price_change_24h || 0);
+      return (b.risk_score || 0) - (a.risk_score || 0);
+    });
+  }, [alertsOnly, items, sortMode]);
 
   return (
-    <aside className="risk-panel min-w-0 rounded-lg p-3">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-slate-500">自选币种</h2>
+    <aside className="min-w-0 rounded-lg border border-slate-200/70 bg-white p-3 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Asset Risk Board</p>
+          <h2 className="mt-1 text-base font-bold text-slate-950">资产风险榜</h2>
+        </div>
         <div className="flex items-center gap-2">
-          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">{items.length}</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{sortedItems.length}</span>
           <button
             aria-pressed={deleteMode}
             aria-label={deleteMode ? "关闭删除模式" : "管理自选币种"}
             className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-xs transition-colors duration-200 ${
               deleteMode
                 ? "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
-                : "border-blue-100 bg-white text-slate-500 hover:bg-blue-50 hover:text-rose-600"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-rose-50 hover:text-rose-600"
             }`}
             onClick={() => setDeleteMode((value) => !value)}
             type="button"
@@ -805,14 +920,46 @@ function WatchlistPanel({
           </button>
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-        {items.map((item) => {
+      <div className="mb-3 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ["risk", "按风险"],
+            ["loss", "按亏损"],
+            ["value", "按持仓"],
+            ["volatility", "按波动"],
+          ] as Array<[WatchlistSortMode, string]>).map(([mode, label]) => (
+            <button
+              aria-pressed={sortMode === mode}
+              className={`h-8 rounded-md border text-xs font-bold transition-colors duration-200 ${
+                sortMode === mode ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+              }`}
+              key={mode}
+              onClick={() => setSortMode(mode)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="flex h-8 items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
+          只看有预警资产
+          <input
+            checked={alertsOnly}
+            className="h-4 w-4 accent-blue-600"
+            onChange={(event) => setAlertsOnly(event.target.checked)}
+            type="checkbox"
+          />
+        </label>
+      </div>
+      <div className="risk-scroll grid max-h-[calc(100vh-330px)] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-1">
+        {sortedItems.map((item) => {
           const selected = item.symbol === selectedSymbol;
+          const alertCount = item.risk_score >= item.alert_threshold ? 1 : 0;
           return (
             <article
               key={item.symbol}
               className={`group relative rounded-lg border p-3 transition-colors duration-200 ${deleteMode ? "pr-10" : ""} ${
-                selected ? "border-emerald-400 bg-emerald-50" : "border-blue-100 bg-white hover:border-emerald-300 hover:bg-emerald-50/60"
+                selected ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/60"
               }`}
             >
               <button type="button" onClick={() => onSelect(item.symbol)} className="w-full text-left">
@@ -831,10 +978,12 @@ function WatchlistPanel({
                 <div className="mt-3 flex items-end justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-slate-900">{formatUsdt(item.current_price)}</p>
-                    <p className={`mt-1 text-xs font-bold ${item.price_change_24h >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                      {formatPercent(item.price_change_24h)}
+                    <p className={`mt-1 text-xs font-bold ${item.price_change_24h >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      {formatPercent(item.price_change_24h)} ｜ 持仓 {formatUsdt(item.market_value || 0)}
                     </p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">预警 {alertCount} ｜ 阈值 {item.alert_threshold}</p>
                   </div>
+                  <AssetSparkline item={item} />
                 </div>
               </button>
               {deleteMode ? (
@@ -850,6 +999,11 @@ function WatchlistPanel({
             </article>
           );
         })}
+        {!sortedItems.length ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+            当前筛选下暂无资产。
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -873,25 +1027,65 @@ function RiskSummaryPanel({
   const threshold = Math.round(toNumber(form.alertThreshold, watchItem?.alert_threshold || 70));
   const riskScore = snapshot?.risk_score ?? watchItem?.risk_score ?? 0;
   const thresholdTriggered = riskScore >= threshold;
+  const pnl = watchItem?.floating_pnl || 0;
+  const pnlRate = watchItem?.floating_pnl_rate || 0;
+  const holdingDays = watchItem?.created_at ? Math.max(1, Math.round((Date.now() - Date.parse(watchItem.created_at)) / 86_400_000)) : 0;
+  const riskSources = buildRiskSources(snapshot, watchItem, thresholdTriggered);
 
   return (
-    <aside className="risk-panel min-w-0 rounded-lg bg-white p-4">
+    <aside className="min-w-0 rounded-lg border border-slate-200/70 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Holding Impact</p>
-          <h2 className="mt-1 text-lg font-bold text-slate-950">持仓与风险摘要</h2>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Decision Panel</p>
+          <h2 className="mt-1 text-lg font-bold text-slate-950">当前资产风险摘要</h2>
         </div>
         {snapshot ? <RiskBadge level={snapshot.risk_level} score={snapshot.risk_score} /> : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <InfoTile label="当前价值" value={formatUsdt(watchItem?.market_value || 0)} />
-        <InfoTile label="浮动盈亏" value={formatUsdt(watchItem?.floating_pnl || 0)} tone={(watchItem?.floating_pnl || 0) >= 0 ? "up" : "down"} />
-        <InfoTile label="24h 涨跌" value={formatPercent(snapshot?.price_change_24h ?? watchItem?.price_change_24h ?? 0)} tone={(snapshot?.price_change_24h ?? 0) >= 0 ? "up" : "down"} />
+        <InfoTile label="当前仓位" value={watchItem?.is_holding ? `${formatNumber(watchItem.amount || 0, 6)} ${watchItem.base_asset}` : "仅关注"} />
+        <InfoTile label="当前盈亏" value={`${formatUsdt(pnl)} / ${formatPercent(pnlRate)}`} tone={pnl >= 0 ? "up" : "down"} />
+        <InfoTile label="持仓天数" value={holdingDays ? `${holdingDays} 天` : "--"} />
         <InfoTile label="相关新闻" value={`${snapshot?.related_news_count || 0} 条`} />
       </div>
 
-      <form className="mt-4 space-y-3 rounded-lg border border-blue-100 bg-slate-50 p-3" onSubmit={onSubmit}>
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-slate-500">风险雷达</p>
+            <p className="mt-1 text-sm font-bold text-slate-950">综合风险 {riskScore}/100</p>
+          </div>
+          <RiskRadarMini snapshot={snapshot} watchItem={watchItem} />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">主要风险来源</p>
+        {riskSources.map((source) => (
+          <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" key={source.label}>
+            <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${source.tone}`} />
+            <div>
+              <p className="text-sm font-bold text-slate-900">{source.label}</p>
+              <p className="mt-0.5 text-xs leading-5 text-slate-500">{source.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 p-3">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">风险提醒</p>
+        <p className="mt-2 text-sm leading-6 text-slate-700">
+          当前 AI 风险分 {riskScore}/100，提醒线为 {threshold}。达到提醒线后，系统只提示关注，不生成调仓动作。
+        </p>
+        <button
+          className="mt-3 h-9 w-full rounded-lg border border-blue-200 bg-white text-xs font-bold text-blue-700 transition-colors duration-200 hover:bg-blue-50"
+          type="button"
+        >
+          设置风险提醒
+        </button>
+      </div>
+
+      <form className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" onSubmit={onSubmit}>
         <label className="flex items-center justify-between gap-3 text-sm font-bold text-slate-700">
           标记为持仓
           <input
@@ -906,7 +1100,7 @@ function RiskSummaryPanel({
           <PortfolioInput label="买入均价" value={form.avgBuyPrice} onChange={(value) => onChangeForm({ ...form, avgBuyPrice: value })} />
           <PortfolioInput label="AI 风险分提醒线" value={form.alertThreshold} onChange={(value) => onChangeForm({ ...form, alertThreshold: value })} />
         </div>
-        <div className={`rounded-lg border px-3 py-2 text-xs leading-5 ${thresholdTriggered ? "border-amber-200 bg-amber-50 text-amber-800" : "border-blue-100 bg-white text-slate-500"}`}>
+        <div className={`rounded-lg border px-3 py-2 text-xs leading-5 ${thresholdTriggered ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-500"}`}>
           {thresholdTriggered ? "当前 AI 风险分已达到提醒线，建议检查相关新闻和持仓敞口。" : "提醒线按 AI 风险分触发，用来提示关注风险，不是价格止损或自动卖出。"}
         </div>
         <button
@@ -1005,6 +1199,7 @@ function PortfolioInteractiveChart({
   selectedEvent,
   setRange,
   tradeMarkers,
+  watchItem,
 }: {
   activePresetLabel: string | null;
   candles: PortfolioMarketCandle[];
@@ -1019,12 +1214,21 @@ function PortfolioInteractiveChart({
   selectedEvent: PortfolioRiskEvent | null;
   setRange: Dispatch<SetStateAction<PortfolioChartRange>>;
   tradeMarkers: PortfolioTradeMarker[];
+  watchItem: PortfolioWatchlistItem | null;
 }) {
   const dragRef = useRef<{ moved: boolean; range: PortfolioChartRange; x: number } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const zoomDragRef = useRef<{ mode: PortfolioZoomDragMode; range: PortfolioChartRange; trackWidth: number; x: number } | null>(null);
   const [hoverPoint, setHoverPoint] = useState<PortfolioHoverPoint | null>(null);
   const [openEventStack, setOpenEventStack] = useState<{ events: PortfolioRiskEvent[]; x: number } | null>(null);
+  const [visibleLayers, setVisibleLayers] = useState<Record<PortfolioChartLayer, boolean>>({
+    events: true,
+    levels: true,
+    ma: true,
+    stop: true,
+    volatility: false,
+    volume: true,
+  });
 
   const maxIndex = Math.max(0, candles.length - 1);
   const safeRange = clampPortfolioRange(range, maxIndex);
@@ -1060,6 +1264,23 @@ function PortfolioInteractiveChart({
   const rangeSpan = Math.max(1, maxIndex);
   const startPercent = maxIndex ? (safeRange.start / rangeSpan) * 100 : 0;
   const endPercent = maxIndex ? (safeRange.end / rangeSpan) * 100 : 100;
+  const chartDecision = buildChartDecisionText(watchItem?.symbol || "", latest, readoutMa10, readoutMa30, events);
+  const supportLevel = visibleCandles.length ? Math.min(...visibleCandles.slice(-Math.min(48, visibleCandles.length)).map((item) => item.low)) : 0;
+  const resistanceLevel = visibleCandles.length ? Math.max(...visibleCandles.slice(-Math.min(48, visibleCandles.length)).map((item) => item.high)) : 0;
+  const costLevel = watchItem?.avg_buy_price || 0;
+  const stopLevel = costLevel ? costLevel * 0.93 : supportLevel;
+  const volatility = getPortfolioVolatility(visibleCandles);
+  const helperLines = [
+    { color: "#2563eb", label: "当前价", layer: null, value: latest?.close || 0 },
+    { color: "#64748b", label: "成本价", layer: null, value: costLevel },
+    { color: "#dc2626", label: "止损价", layer: "stop" as const, value: stopLevel },
+    { color: "#d97706", label: "支撑位", layer: "levels" as const, value: supportLevel },
+    { color: "#7c3aed", label: "压力位", layer: "levels" as const, value: resistanceLevel },
+  ].filter((line) => (!line.layer || visibleLayers[line.layer]) && line.value > 0 && line.value >= priceRange.min && line.value <= priceRange.max);
+
+  function toggleLayer(layer: PortfolioChartLayer) {
+    setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
+  }
 
   function updateRange(next: PortfolioChartRange, isManual = true) {
     if (isManual) onManualRange();
@@ -1225,42 +1446,47 @@ function PortfolioInteractiveChart({
   }
 
   return (
-    <div className="rounded-lg border border-blue-100 bg-white p-2.5 shadow-sm sm:p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="mr-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Market Candles</span>
-          <span className="text-xs font-bold text-slate-600">K 线</span>
-          {portfolioZoomPresets.map((preset) => (
-            <button
-              aria-pressed={activePresetLabel === preset.label}
-              className={`h-8 rounded-md border px-3 text-xs font-bold transition-all duration-200 ${
-                activePresetLabel === preset.label
-                  ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-100"
-                  : "border-blue-100 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50"
-              }`}
-              key={preset.label}
-              onClick={() => onPresetRange(preset)}
-              type="button"
-            >
-              {preset.label}
-            </button>
-          ))}
-          <span className="hidden text-xs text-slate-400 sm:inline">滚轮缩放 / 拖拽平移</span>
+    <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">AI Chart Insight</p>
+        <p className="mt-1 text-sm font-semibold leading-6 text-slate-800">{chartDecision}</p>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="space-y-2">
+          <ControlGroup label="时间周期">
+            {portfolioZoomPresets.map((preset) => (
+              <button
+                aria-pressed={activePresetLabel === preset.label}
+                className={`h-8 rounded-md border px-3 text-xs font-bold transition-all duration-200 ${
+                  activePresetLabel === preset.label
+                    ? "border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-100"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                }`}
+                key={preset.label}
+                onClick={() => onPresetRange(preset)}
+                type="button"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </ControlGroup>
+          <ControlGroup label="指标">
+            <ChartLayerButton active={visibleLayers.ma} label="MA" onClick={() => toggleLayer("ma")} />
+            <ChartLayerButton active={visibleLayers.volume} label="成交量" onClick={() => toggleLayer("volume")} />
+            <ChartLayerButton active={visibleLayers.volatility} label="波动率" onClick={() => toggleLayer("volatility")} />
+          </ControlGroup>
+          <ControlGroup label="风险信号">
+            <ChartLayerButton active={visibleLayers.events} label="新闻事件" onClick={() => toggleLayer("events")} tone="amber" />
+            <ChartLayerButton active={visibleLayers.stop} label="止损线" onClick={() => toggleLayer("stop")} tone="amber" />
+            <ChartLayerButton active={visibleLayers.levels} label="支撑压力位" onClick={() => toggleLayer("levels")} tone="amber" />
+          </ControlGroup>
         </div>
-        <div className="text-right text-xs font-semibold text-slate-500">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-xs font-semibold text-slate-500">
           <span>{visibleCandles.length} candles</span>
           <span className="mx-2 text-slate-300">/</span>
           <span>{formatPortfolioTime(latest?.open_time || 0)}</span>
         </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-emerald-600" />绿色：上涨</span>
-        <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-red-600" />红色：下跌</span>
-        <span>MA10</span>
-          <span>MA30</span>
-          <span>成交量</span>
-        <span>点击图中 K 线可按该时间和价格记录加仓 / 卖出。</span>
       </div>
 
       <PortfolioEventBanner event={selectedEvent} onClose={onCloseBanner} onViewAnalysis={onViewAnalysis} />
@@ -1304,8 +1530,28 @@ function PortfolioInteractiveChart({
           {[104, 172, 240, 308, 376].map((y) => (
             <line key={y} stroke="#dbe4f0" strokeDasharray="4 8" strokeWidth="1" x1={portfolioChartSpec.paddingX} x2={portfolioChartSpec.width - portfolioChartSpec.paddingX} y1={y} y2={y} />
           ))}
+          {visibleLayers.volatility ? (
+            <g pointerEvents="none">
+              <rect fill="#eff6ff" height="22" rx="6" stroke="#bfdbfe" width="118" x={portfolioChartSpec.width - 146} y={portfolioChartSpec.priceTop + 8} />
+              <text fill="#2563eb" fontSize="10" fontWeight="800" x={portfolioChartSpec.width - 136} y={portfolioChartSpec.priceTop + 23}>
+                波动率 {formatPercent(volatility)}
+              </text>
+            </g>
+          ) : null}
+          {helperLines.map((line, index) => {
+            const y = portfolioPriceY(line.value, priceRange.min, priceRange.max);
+            return (
+              <g key={`${line.label}-${line.value}`}>
+                <line opacity="0.72" stroke={line.color} strokeDasharray="5 5" strokeWidth="1.2" x1={portfolioChartSpec.paddingX} x2={portfolioChartSpec.width - portfolioChartSpec.paddingX} y1={y} y2={y} />
+                <rect fill="#ffffff" height="16" rx="4" stroke={line.color} strokeOpacity="0.35" width="96" x={portfolioChartSpec.paddingX + 5} y={clampNumber(y - 8 + index % 2, portfolioChartSpec.priceTop, portfolioChartSpec.priceBottom - 16)} />
+                <text fill={line.color} fontSize="9" fontWeight="800" x={portfolioChartSpec.paddingX + 11} y={clampNumber(y + 3 + index % 2, portfolioChartSpec.priceTop + 11, portfolioChartSpec.priceBottom - 5)}>
+                  {line.label} {formatNumber(line.value, 2)}
+                </text>
+              </g>
+            );
+          })}
           <rect fill="transparent" height={portfolioChartSpec.volumeBottom - portfolioChartSpec.volumeTop + 10} width={portfolioChartSpec.width - portfolioChartSpec.paddingX * 2} x={portfolioChartSpec.paddingX} y={portfolioChartSpec.volumeTop - 5} />
-          <g>
+          {visibleLayers.events ? <g>
             {clusters.map((cluster) => {
               const groupEvent = getDominantPortfolioEvent(cluster.events);
               const anchorIndex = groupEvent.candle_index;
@@ -1328,7 +1574,7 @@ function PortfolioInteractiveChart({
                 />
               );
             })}
-          </g>
+          </g> : null}
           {visibleCandles.map((candle, index) => {
             const x = portfolioCandleX(index, visibleCandles.length);
             const up = candle.close >= candle.open;
@@ -1349,12 +1595,12 @@ function PortfolioInteractiveChart({
                 ) : null}
                 <line stroke={color} strokeWidth="1.4" x1={x} x2={x} y1={yHigh} y2={yLow} />
                 <rect fill={color} height={bodyHeight} rx="1.2" width={candleWidth} x={x - candleWidth / 2} y={bodyY} />
-                <rect fill={color} height={volumeBarHeight} opacity="0.34" rx="0.8" width={candleWidth} x={x - candleWidth / 2} y={portfolioChartSpec.volumeBottom - volumeBarHeight} />
+                {visibleLayers.volume ? <rect fill={color} height={volumeBarHeight} opacity="0.34" rx="0.8" width={candleWidth} x={x - candleWidth / 2} y={portfolioChartSpec.volumeBottom - volumeBarHeight} /> : null}
               </g>
             );
           })}
-          {ma10Path ? <path d={ma10Path} fill="none" stroke="#d97706" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /> : null}
-          {ma30Path ? <path d={ma30Path} fill="none" stroke="#2563eb" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /> : null}
+          {visibleLayers.ma && ma10Path ? <path d={ma10Path} fill="none" stroke="#d97706" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /> : null}
+          {visibleLayers.ma && ma30Path ? <path d={ma30Path} fill="none" stroke="#2563eb" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /> : null}
           {visibleTradeMarkers.map((marker, order) => {
             const relativeIndex = marker.candle_index - safeRange.start;
             const x = portfolioCandleX(relativeIndex, visibleCandles.length);
@@ -1390,7 +1636,7 @@ function PortfolioInteractiveChart({
               </text>
             </g>
           ) : null}
-          {clusters.map((cluster) => {
+          {visibleLayers.events ? clusters.map((cluster) => {
             const groupEvent = getDominantPortfolioEvent(cluster.events);
             const count = cluster.events.length;
             const isCluster = count > 1;
@@ -1433,7 +1679,7 @@ function PortfolioInteractiveChart({
                 )}
               </g>
             );
-          })}
+          }) : null}
         </svg>
         {openEventStack ? (
           <PortfolioEventStackPopover
@@ -1447,7 +1693,7 @@ function PortfolioInteractiveChart({
         ) : null}
       </div>
 
-      <PortfolioRiskHeatTimeline events={events} maxIndex={maxIndex} range={safeRange} />
+      {visibleLayers.events ? <PortfolioRiskHeatTimeline events={events} maxIndex={maxIndex} range={safeRange} /> : null}
 
       <div className="mt-2 rounded-lg border border-blue-100 bg-slate-50/70 px-3 py-2">
         <div className="mb-2 flex items-center justify-between">
@@ -1677,42 +1923,90 @@ function PortfolioEventAnalysisModal({
 }
 
 function RelatedNewsSection({ items, selectedSymbol }: { items: PortfolioNewsItem[]; selectedSymbol: string }) {
+  const [filter, setFilter] = useState<"all" | "high" | "holding" | "recent">("all");
+  const filteredItems = useMemo(() => {
+    const now = Date.now();
+    return items.filter((item) => {
+      if (filter === "high") return item.risk_score >= 70;
+      if (filter === "holding") return item.matched_reason || item.title.includes(selectedSymbol.replace(/USDT$/, ""));
+      if (filter === "recent") {
+        const time = Date.parse(item.published_at || "");
+        return Number.isFinite(time) && now - time <= 86_400_000;
+      }
+      return true;
+    });
+  }, [filter, items, selectedSymbol]);
+  const sortedItems = useMemo(() => [...filteredItems].sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0)), [filteredItems]);
+
   return (
-    <section className="risk-card rounded-lg">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 px-4 py-4 sm:px-5">
+    <section className="rounded-lg border border-slate-200/70 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Related News</p>
-          <h2 className="mt-1 text-lg font-bold text-slate-950">{selectedSymbol || "--"} 相关新闻与证据</h2>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Risk Event Stream</p>
+          <h2 className="mt-1 text-lg font-bold text-slate-950">{selectedSymbol || "--"} 风险事件流</h2>
         </div>
-        <span className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-600">
-          {items.length} 条
-        </span>
+        <div className="risk-scroll flex max-w-full gap-2 overflow-x-auto pb-1">
+          {([
+            ["all", "全部"],
+            ["high", "高影响"],
+            ["holding", "持仓相关"],
+            ["recent", "24小时"],
+          ] as const).map(([key, label]) => (
+            <button
+              aria-pressed={filter === key}
+              className={`h-9 shrink-0 rounded-lg border px-3 text-xs font-bold transition-colors duration-200 ${
+                filter === key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+              }`}
+              key={key}
+              onClick={() => setFilter(key)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">
-        {items.length ? items.slice(0, 8).map((item) => (
-          <article key={item.news_id} className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{formatPortfolioRiskType(item.risk_type || "综合风险")}</span>
-                  <span className="text-xs font-semibold text-slate-400">{item.published_at || "--"}</span>
-                </div>
-                <Link
-                  href={`/news/${encodeURIComponent(item.news_id)}?returnTo=${encodeURIComponent("/portfolio")}`}
-                  className="line-clamp-2 text-sm font-bold leading-6 text-slate-950 transition-colors duration-200 hover:text-blue-700"
-                >
-                  {item.title || "未命名新闻"}
-                </Link>
-              </div>
-              <span className="text-2xl font-bold text-rose-600">{item.risk_score}</span>
-            </div>
-            <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{item.summary || item.content || "暂无简析。"}</p>
-            <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
-              <p className="text-xs font-bold text-slate-500">证据句</p>
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-700">{item.evidence || item.matched_reason || "暂无结构化证据。"}</p>
-            </div>
-          </article>
-        )) : (
+      <div className="p-4 sm:p-5">
+        {sortedItems.length ? (
+          <div className="risk-scroll overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[920px] text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-500">
+                <tr>
+                  <th className="w-24 px-3 py-3 text-center">风险分</th>
+                  <th className="min-w-[320px] px-3 py-3">新闻</th>
+                  <th className="min-w-[150px] px-3 py-3">风险类别</th>
+                  <th className="min-w-[260px] px-3 py-3">关联原因</th>
+                  <th className="w-40 px-3 py-3">时间</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedItems.slice(0, 12).map((item) => (
+                  <tr key={item.news_id} className="transition-colors duration-200 hover:bg-blue-50/40">
+                    <td className={`px-3 py-3 text-center text-lg font-bold ${item.risk_score >= 80 ? "text-rose-600" : item.risk_score >= 50 ? "text-orange-600" : "text-amber-600"}`}>
+                      {item.risk_score}
+                    </td>
+                    <td className="px-3 py-3">
+                      <Link
+                        href={`/news/${encodeURIComponent(item.news_id)}?returnTo=${encodeURIComponent("/portfolio")}`}
+                        className="line-clamp-1 font-bold text-slate-950 transition-colors duration-200 hover:text-blue-700"
+                      >
+                        {item.title || "未命名新闻"}
+                      </Link>
+                      <p className="mt-1 line-clamp-1 text-xs leading-5 text-slate-500">{item.summary || item.content || "暂无简析。"}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{formatPortfolioRiskType(item.risk_type || "综合风险")}</span>
+                    </td>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-600">
+                      <span className="line-clamp-2">{item.matched_reason || item.evidence || `与 ${selectedSymbol} 风险快照相关。`}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs font-semibold text-slate-500">{item.published_at || "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
           <div className="col-span-full rounded-lg border border-dashed border-blue-200 bg-blue-50/70 p-6 text-center text-sm font-semibold text-slate-600">
             当前币种相关新闻不足，AI 风险分析将主要基于行情波动和持仓敞口。
           </div>
@@ -1822,6 +2116,43 @@ function PortfolioInput({
   );
 }
 
+function ControlGroup({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="w-16 shrink-0 text-xs font-bold text-slate-500">{label}</span>
+      <div className="flex min-w-0 flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
+
+function ChartLayerButton({
+  active,
+  label,
+  onClick,
+  tone = "blue",
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  tone?: "blue" | "amber";
+}) {
+  const activeClass = tone === "amber"
+    ? "border-amber-300 bg-amber-50 text-amber-700 shadow-sm shadow-amber-100"
+    : "border-blue-300 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100";
+  return (
+    <button
+      aria-pressed={active}
+      className={`h-8 rounded-md border px-2.5 text-xs font-bold transition-all duration-200 ${
+        active ? activeClass : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
 function PortfolioMetric({ helper, label, value }: { helper?: string; label: string; value: string }) {
   return (
     <div className="rounded-lg border border-blue-100 bg-white px-4 py-3">
@@ -1833,9 +2164,9 @@ function PortfolioMetric({ helper, label, value }: { helper?: string; label: str
 }
 
 function InfoTile({ label, tone, value }: { label: string; tone?: "up" | "down"; value: string }) {
-  const toneClass = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-red-600" : "text-slate-950";
+  const toneClass = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-slate-950";
   return (
-    <div className="rounded-lg border border-blue-100 bg-white px-3 py-3">
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
       <p className="text-xs font-bold text-slate-500">{label}</p>
       <p className={`mt-1 truncate text-sm font-bold ${toneClass}`}>{value}</p>
     </div>
@@ -1844,10 +2175,31 @@ function InfoTile({ label, tone, value }: { label: string; tone?: "up" | "down";
 
 function TextBlock({ text, title }: { text: string; title: string }) {
   return (
-    <div className="rounded-lg border border-blue-100 bg-slate-50 px-3 py-3">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
       <p className="text-xs font-bold text-slate-500">{title}</p>
       <p className="mt-1 text-sm leading-6 text-slate-700">{text}</p>
     </div>
+  );
+}
+
+function RiskRadarMini({ snapshot, watchItem }: { snapshot: CoinRiskSnapshot | null; watchItem: PortfolioWatchlistItem | null }) {
+  const values = buildRiskRadarValues(snapshot, watchItem);
+  const points = values.map((value, index) => {
+    const angle = (-90 + index * 60) * Math.PI / 180;
+    const radius = 10 + (value.value / 100) * 38;
+    return `${50 + Math.cos(angle) * radius},${50 + Math.sin(angle) * radius}`;
+  }).join(" ");
+  return (
+    <svg className="h-24 w-24 shrink-0" viewBox="0 0 100 100" aria-label="资产风险雷达图">
+      {[24, 38, 50].map((radius) => (
+        <circle key={radius} cx="50" cy="50" fill="none" r={radius} stroke="#cbd5e1" strokeDasharray="2 4" strokeWidth="1" />
+      ))}
+      {values.map((_, index) => {
+        const angle = (-90 + index * 60) * Math.PI / 180;
+        return <line key={index} stroke="#e2e8f0" strokeWidth="1" x1="50" x2={50 + Math.cos(angle) * 48} y1="50" y2={50 + Math.sin(angle) * 48} />;
+      })}
+      <polygon fill="#2563eb" opacity="0.16" points={points} stroke="#2563eb" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
   );
 }
 
@@ -1893,25 +2245,36 @@ function RiskBadge({ level, score }: { level: PortfolioRiskLevel; score: number 
 
 function CoinAvatar({ symbol }: { symbol: string }) {
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-xs font-bold text-white">
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-700 text-xs font-bold text-white">
       {symbol.slice(0, 1)}
     </span>
   );
 }
 
+function AssetSparkline({ item }: { item: PortfolioWatchlistItem }) {
+  const positive = item.price_change_24h >= 0;
+  const points = buildAssetSparklinePoints(item);
+  return (
+    <svg className="h-10 w-20 shrink-0" preserveAspectRatio="none" viewBox="0 0 80 40" aria-hidden="true">
+      <path d={points} fill="none" stroke={positive ? "#059669" : "#dc2626"} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d={`${points} L 80 40 L 0 40 Z`} fill={positive ? "#10b981" : "#ef4444"} opacity="0.08" />
+    </svg>
+  );
+}
+
 function riskLevelStyle(level: PortfolioRiskLevel) {
   if (level === "critical") return "border-red-300 bg-red-900 text-white";
-  if (level === "high") return "border-red-200 bg-red-50 text-red-700";
+  if (level === "high") return "border-orange-200 bg-orange-50 text-orange-700";
   if (level === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
 function formatRiskLevel(level: PortfolioRiskLevel) {
   const labels: Record<PortfolioRiskLevel, string> = {
-    low: "低风险",
-    medium: "中风险",
-    high: "高风险",
-    critical: "严重",
+    low: "安全",
+    medium: "观察",
+    high: "谨慎",
+    critical: "预警",
   };
   return labels[level];
 }
@@ -1941,6 +2304,108 @@ function buildPortfolioRiskEvents(
       title: item.title || "未命名风险事件",
     };
   }).sort((a, b) => a.candle_index - b.candle_index || b.risk_score - a.risk_score);
+}
+
+function buildPortfolioDecisionAdvice(averageRisk: number, highRiskCount: number, warningCount: number, pnlRate: number) {
+  if (averageRisk >= 75 || highRiskCount >= 2) return "降低仓位";
+  if (warningCount > 0 || averageRisk >= 45 || pnlRate < -0.05) return "观察";
+  return "可加仓";
+}
+
+function buildRiskSources(
+  snapshot: CoinRiskSnapshot | null,
+  watchItem: PortfolioWatchlistItem | null,
+  thresholdTriggered: boolean,
+) {
+  const priceChange = snapshot?.price_change_24h ?? watchItem?.price_change_24h ?? 0;
+  return [
+    {
+      detail: priceChange < 0 ? `24h 下跌 ${formatPercent(priceChange)}，短期趋势偏弱。` : `24h 变化 ${formatPercent(priceChange)}，趋势信号暂未恶化。`,
+      label: "技术面",
+      tone: priceChange < -0.03 ? "bg-orange-500" : "bg-blue-500",
+    },
+    {
+      detail: `${snapshot?.high_risk_news_count || 0} 条高风险新闻，${snapshot?.related_news_count || 0} 条相关新闻纳入分析。`,
+      label: "新闻面",
+      tone: (snapshot?.high_risk_news_count || 0) ? "bg-rose-500" : "bg-slate-400",
+    },
+    {
+      detail: Math.abs(priceChange) >= 0.04 ? "近 24h 波动扩大，需要关注支撑位和止损线。" : "波动暂处于可观察区间。",
+      label: "波动率",
+      tone: Math.abs(priceChange) >= 0.04 ? "bg-amber-500" : "bg-emerald-500",
+    },
+    {
+      detail: thresholdTriggered ? "AI 风险分已超过你设置的提醒阈值。" : "当前风险分未超过提醒阈值。",
+      label: "预警阈值",
+      tone: thresholdTriggered ? "bg-orange-500" : "bg-emerald-500",
+    },
+  ];
+}
+
+function buildDecisionActions(snapshot: CoinRiskSnapshot | null, watchItem: PortfolioWatchlistItem | null, threshold: number) {
+  const riskScore = snapshot?.risk_score ?? watchItem?.risk_score ?? 0;
+  const price = watchItem?.current_price || 0;
+  const softStop = price ? price * 0.97 : 0;
+  if (riskScore >= 80) {
+    return [
+      "保守：减仓 30%，先降低单资产敞口。",
+      softStop ? `中性：设置 ${formatNumber(softStop, 2)} 附近的风险提醒。` : "中性：设置价格与 AI 风险分双提醒。",
+      "激进：等待重新站上短期均线后再判断。",
+    ];
+  }
+  if (riskScore >= threshold || riskScore >= 50) {
+    return [
+      "保守：暂停新增仓位，等待风险分回落。",
+      softStop ? `中性：跌破 ${formatNumber(softStop, 2)} 时提醒我。` : "中性：开启阈值提醒并跟踪相关新闻。",
+      "激进：只在成交量回落且新闻面转中性后加仓。",
+    ];
+  }
+  return [
+    "保守：保持观察，维持当前仓位。",
+    "中性：保留 AI 风险分提醒线。",
+    "激进：若重新放量上行，再考虑增加仓位。",
+  ];
+}
+
+function buildRiskRadarValues(snapshot: CoinRiskSnapshot | null, watchItem: PortfolioWatchlistItem | null) {
+  const risk = snapshot?.risk_score ?? watchItem?.risk_score ?? 0;
+  const change = Math.abs(snapshot?.price_change_24h ?? watchItem?.price_change_24h ?? 0);
+  return [
+    { label: "技术", value: clampNumber(risk * 0.85 + change * 500, 0, 100) },
+    { label: "新闻", value: clampNumber((snapshot?.high_risk_news_count || 0) * 22 + (snapshot?.related_news_count || 0) * 2, 0, 100) },
+    { label: "波动", value: clampNumber(change * 900, 0, 100) },
+    { label: "流动性", value: clampNumber(risk * 0.55, 0, 100) },
+    { label: "集中", value: watchItem?.market_value ? clampNumber(35 + risk * 0.45, 0, 100) : 20 },
+    { label: "回撤", value: clampNumber(Math.abs(watchItem?.floating_pnl_rate || 0) * 700, 0, 100) },
+  ];
+}
+
+function buildChartDecisionText(
+  symbol: string,
+  latest: PortfolioMarketCandle | undefined,
+  ma10: number | null | undefined,
+  ma30: number | null | undefined,
+  events: PortfolioRiskEvent[],
+) {
+  if (!latest) return "暂无行情数据，刷新后将生成趋势与风险结论。";
+  const belowMa10 = ma10 ? latest.close < ma10 : false;
+  const belowMa30 = ma30 ? latest.close < ma30 : false;
+  const highEventCount = events.filter((event) => event.risk_score >= 70).length;
+  const trendText = belowMa10 && belowMa30 ? "处于下行趋势，价格低于 MA10 与 MA30" : belowMa10 ? "短线弱于 MA10，趋势需要观察" : "短线仍在均线附近或上方";
+  const riskText = highEventCount ? `图中有 ${highEventCount} 个高影响风险事件` : "暂无密集高影响事件";
+  const action = belowMa10 && highEventCount ? "建议降低仓位或等待企稳信号。" : "建议结合支撑位、止损线和新闻事件继续观察。";
+  return `${symbol || "当前资产"} ${trendText}，${riskText}。${action}`;
+}
+
+function buildAssetSparklinePoints(item: PortfolioWatchlistItem) {
+  const direction = item.price_change_24h >= 0 ? -1 : 1;
+  const volatility = Math.min(14, Math.abs(item.price_change_24h) * 240);
+  return Array.from({ length: 7 }, (_, index) => {
+    const x = (index / 6) * 80;
+    const wave = Math.sin(index * 1.35 + item.risk_score / 20) * 4;
+    const y = 22 + direction * (index - 3) * (volatility / 6) + wave;
+    return `${index ? "L" : "M"} ${x.toFixed(1)} ${clampNumber(y, 8, 34).toFixed(1)}`;
+  }).join(" ");
 }
 
 function findNearestPortfolioCandleIndex(candles: PortfolioMarketCandle[], publishedAt: string, order: number, total: number) {
@@ -2113,6 +2578,18 @@ function getPortfolioPriceRange(candles: PortfolioMarketCandle[]) {
   const max = Math.max(...candles.map((item) => item.high));
   const span = max - min || Math.max(max, 1) * 0.01;
   return { max: max + span * 0.04, min: min - span * 0.04 };
+}
+
+function getPortfolioVolatility(candles: PortfolioMarketCandle[]) {
+  const recent = candles.slice(-Math.min(32, candles.length));
+  if (recent.length < 2) return 0;
+  const returns = recent.slice(1).map((candle, index) => {
+    const previous = recent[index]?.close || candle.open || 1;
+    return previous ? (candle.close - previous) / previous : 0;
+  });
+  const average = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+  const variance = returns.reduce((sum, value) => sum + (value - average) ** 2, 0) / returns.length;
+  return Math.sqrt(variance);
 }
 
 function portfolioPriceY(price: number, min: number, max: number, top = portfolioChartSpec.priceTop, bottom = portfolioChartSpec.priceBottom) {
@@ -2349,6 +2826,12 @@ function toNumber(value: string, fallback = 0) {
 function normalizeInputSymbol(symbol: string) {
   const compact = symbol.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   return compact.endsWith("USDT") ? compact : `${compact}USDT`;
+}
+
+function readRequestedPortfolioSymbol() {
+  if (typeof window === "undefined") return "";
+  const value = new URLSearchParams(window.location.search).get("asset") || "";
+  return value ? normalizeInputSymbol(value) : "";
 }
 
 function formatNow() {

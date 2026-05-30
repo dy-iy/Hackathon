@@ -157,6 +157,7 @@ export type RiskAssistantResponse = {
   status: string;
   message: string;
   answer: string;
+  analysis_mode?: string;
 };
 
 export type NewsRankingItem = {
@@ -387,6 +388,38 @@ export type PortfolioRefreshJob = {
   finished_at: string;
 };
 
+export type AuthUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  created_at: string;
+};
+
+export type AuthResponse = {
+  status: string;
+  message: string;
+  user: AuthUser;
+};
+
+export type FavoriteType = "report" | "news";
+
+export type FavoriteItem = {
+  id: string;
+  user_id: string;
+  item_type: FavoriteType;
+  item_id: string;
+  title: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type FavoriteCreatePayload = {
+  item_type: FavoriteType;
+  item_id: string;
+  title: string;
+  payload: Record<string, unknown>;
+};
+
 const legacyApiCachePrefix = "cryptorisk.api-cache:";
 const apiCachePrefix = "cryptorisk.api-cache:v2:";
 const apiCacheTtlMs = 60 * 1000;
@@ -458,6 +491,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const { headers, ...restInit } = init || {};
   const response = await fetch(path, {
     cache: "no-store",
+    credentials: "same-origin",
     ...restInit,
     headers: {
       "Content-Type": "application/json",
@@ -503,6 +537,49 @@ export function sendChatMessage(message: string) {
     method: "POST",
     body: JSON.stringify({ message }),
   });
+}
+
+export function fetchCurrentUser() {
+  return requestJson<AuthUser | null>("/api/auth/me");
+}
+
+export function loginUser(username: string, password: string) {
+  return requestJson<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function registerUser(username: string, password: string) {
+  return requestJson<AuthResponse>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function logoutUser() {
+  return requestJson<{ status: string; message: string }>("/api/auth/logout", {
+    method: "POST",
+  });
+}
+
+export function fetchFavorites(itemType?: FavoriteType) {
+  const search = itemType ? `?item_type=${encodeURIComponent(itemType)}` : "";
+  return requestJson<FavoriteItem[]>(`/api/favorites${search}`);
+}
+
+export function addFavorite(payload: FavoriteCreatePayload) {
+  return requestJson<FavoriteItem>("/api/favorites", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteFavorite(itemType: FavoriteType, itemId: string) {
+  return requestJson<{ status: string; message: string }>(
+    `/api/favorites/${encodeURIComponent(itemType)}/${encodeURIComponent(itemId)}`,
+    { method: "DELETE" }
+  );
 }
 
 export async function streamChatMessage(

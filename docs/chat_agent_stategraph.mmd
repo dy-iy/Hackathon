@@ -24,7 +24,7 @@ graph TD;
 	adaptive_router -. &nbsp;fast_exit&nbsp; .-> low_risk_gate;
 	adaptive_router -. &nbsp;deep_analysis&nbsp; .-> risk_type_branch_analysis;
 	low_risk_gate -. &nbsp;fast_exit confirmed&nbsp; .-> fast_exit_decision;
-	low_risk_gate -. &nbsp;escalate high risk&nbsp; .-> risk_type_branch_analysis;
+	low_risk_gate -. &nbsp;漏判修正 / escalate high risk&nbsp; .-> risk_type_branch_analysis;
 	fast_exit_decision --> final_context_agents;
 	risk_type_branch_analysis --> deterministic_decision_engine;
 	deterministic_decision_engine --> validation_gate;

@@ -23,11 +23,11 @@ from app.agents.chat_agent.nodes import (
 from app.state import CryptoRiskState
 
 
-def _route_after_adaptive_router(state: RiskCaseState) -> Literal["fast_exit", "deep_analysis"]:
+def _route_after_low_risk_gate(state: RiskCaseState) -> Literal["fast_exit", "deep_analysis"]:
     return "fast_exit" if state.get("orchestration_path") == "fast_exit" else "deep_analysis"
 
 
-def _route_after_low_risk_gate(state: RiskCaseState) -> Literal["fast_exit", "deep_analysis"]:
+def _route_after_adaptive_router(state: RiskCaseState) -> Literal["fast_exit", "deep_analysis"]:
     return "fast_exit" if state.get("orchestration_path") == "fast_exit" else "deep_analysis"
 
 

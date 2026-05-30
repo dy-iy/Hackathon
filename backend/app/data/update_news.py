@@ -19,7 +19,7 @@ LEGACY_NEWS_CSV_PATH = DATA_DIR / "raw_300_news.csv"
 load_dotenv(DATA_DIR.parent.parent / ".env")
 load_dotenv(DATA_DIR.parent / ".env")
 
-NEWS_COLUMNS = ["新闻id", "时间", "内容", "链接"]
+NEWS_COLUMNS = ["新闻id", "时间", "标题", "内容", "链接"]
 DEFAULT_BINANCE_NEWS_URL = "https://www.binance.com/bapi/composite/v4/friendly/pgc/feed/news/list"
 DEFAULT_BINANCE_NEWS_PAGE_URL = "https://www.binance.com/zh-CN/square/news/all"
 BINANCE_NEWS_URL = os.getenv("BINANCE_NEWS_URL", DEFAULT_BINANCE_NEWS_URL)
@@ -118,18 +118,19 @@ def _seed_master_dataset(master_csv_path: Path, seed_csv_path: Path = LEGACY_NEW
         return 0
 
     seed_data["新闻id"] = seed_data.apply(
-        lambda row: str(row.get("新闻id") or _build_news_id(row.get("链接"), row.get("时间"), row.get("内容"))),
+        lambda row: str(row.get("新闻id") or _build_news_id(row.get("链接"), row.get("时间"), row.get("内容"), row.get("标题"))),
         axis=1,
     )
     _write_news_csv(seed_data, master_csv_path)
     return len(seed_data)
 
 
-def _build_news_id(link: object, published_at: object, content: object) -> str:
+def _build_news_id(link: object, published_at: object, content: object, title: object = "") -> str:
     fingerprint = "|".join(
         [
             str(link or "").strip(),
             str(published_at or "").strip(),
+            str(title or "").strip(),
             str(content or "").strip(),
         ]
     )
@@ -140,7 +141,7 @@ def _dedupe_key(row: pd.Series) -> str:
     link = str(row.get("链接") or "").strip()
     if link:
         return f"link:{link}"
-    return f"content:{_build_news_id('', row.get('时间'), row.get('内容'))}"
+    return f"content:{_build_news_id('', row.get('时间'), row.get('内容'), row.get('标题'))}"
 
 
 def get_latest_news_time(csv_path: Path) -> dt.datetime:
@@ -185,7 +186,7 @@ def update_master_dataset(
 
     combined = pd.concat([master, new_data], ignore_index=True)
     combined["新闻id"] = combined.apply(
-        lambda row: str(row.get("新闻id") or _build_news_id(row.get("链接"), row.get("时间"), row.get("内容"))),
+        lambda row: str(row.get("新闻id") or _build_news_id(row.get("链接"), row.get("时间"), row.get("内容"), row.get("标题"))),
         axis=1,
     )
     combined["_dedupe_key"] = combined.apply(_dedupe_key, axis=1)
@@ -236,6 +237,22 @@ def _read_response_json(response: requests.Response) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("unexpected news API response shape")
     return payload
+
+
+def _item_text(item: dict[str, object], *fields: str) -> str:
+    for field in fields:
+        value = str(item.get(field) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _content_without_title(title: str, content: str) -> str:
+    cleaned_title = " ".join(str(title or "").split())
+    cleaned_content = " ".join(str(content or "").split())
+    if cleaned_title and cleaned_content.startswith(cleaned_title):
+        cleaned_content = cleaned_content[len(cleaned_title):].strip()
+    return cleaned_content
 
 
 def fetch_binance_news(
@@ -298,17 +315,17 @@ def fetch_binance_news(
                 stop = True
                 break
 
-            title = str(item.get("title") or "").strip()
-            subtitle = str(item.get("subTitle") or "").strip()
-            content = f"{title} {subtitle}".strip()
+            title = _item_text(item, "title", "headline", "name")
+            raw_content = _item_text(item, "content", "body", "summary", "subTitle", "description")
+            content = _content_without_title(title, raw_content)
             link = str(item.get("webLink") or "").strip()
             published_at = news_date.strftime("%Y-%m-%d %H:%M:%S")
 
             records.append(
                 {
-                    "新闻id": _build_news_id(link, published_at, content),
+                    "新闻id": _build_news_id(link, published_at, content, title),
                     "时间": published_at,
-                    "内容": content,
+                    "                    "内容": content,
                     "链接": link,
                 }
             )

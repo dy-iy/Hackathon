@@ -14,16 +14,39 @@ def _is_weak_context(context: dict[str, object]) -> bool:
     return bool(context.get("is_weak_risk")) or score <= 20 or not bool(context.get("has_established_risk"))
 
 
+def _entity_list(context: dict[str, object], *keys: str) -> list[str]:
+    entities = context.get("entities") if isinstance(context.get("entities"), dict) else {}
+    if not isinstance(entities, dict):
+        return []
+
+    values: list[str] = []
+    for key in keys:
+        raw_items = entities.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            text = str(item or "").strip()
+            if text and text not in values:
+                values.append(text)
+    return values[:6]
+
+
 def _weak_risk_advice(context: dict[str, object], source: str = "weak_risk_guard") -> dict[str, object]:
-    del context
+    assets = _entity_list(context, "coins", "tokens")
+    platforms = _entity_list(context, "exchanges", "chains", "projects")
+    monitoring_items = [f"{asset} 后续行情与公告" for asset in assets[:3]]
+    monitoring_items.extend(f"{platform} 状态更新" for platform in platforms[:3])
+    if not monitoring_items:
+        monitoring_items = ["官方公告", "链上异常", "交易所状态页"]
+
     return {
         "priority": "low",
         "recommended_actions": [
             "保留低风险监测状态",
             "等待官方或链上证据再升级",
-            "不要推断具体受影响对象",
+            "仅围绕原文对象持续观察",
         ],
-        "monitoring_items": ["官方公告", "链上异常", "交易所状态页"],
+        "monitoring_items": monitoring_items[:6],
         "verification_needed": ["是否存在官方确认", "是否出现可量化损失", "是否影响用户资产"],
         "do_not_do": ["不要基于弱信号扩大处置范围", "不要给交易方向建议"],
         "source": source,

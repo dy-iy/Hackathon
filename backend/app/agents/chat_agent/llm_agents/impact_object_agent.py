@@ -14,15 +14,39 @@ def _is_weak_context(context: dict[str, object]) -> bool:
     return bool(context.get("is_weak_risk")) or score <= 20 or not bool(context.get("has_established_risk"))
 
 
+def _entity_list(context: dict[str, object], *keys: str) -> list[str]:
+    entities = context.get("entities") if isinstance(context.get("entities"), dict) else {}
+    if not isinstance(entities, dict):
+        return []
+
+    values: list[str] = []
+    for key in keys:
+        raw_items = entities.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            text = str(item or "").strip()
+            if text and text not in values:
+                values.append(text)
+    return values[:6]
+
+
 def _weak_risk_impact(context: dict[str, object], source: str = "weak_risk_guard") -> dict[str, object]:
-    del context
+    assets = _entity_list(context, "coins", "tokens")
+    platforms = _entity_list(context, "exchanges", "chains", "projects")
+    monitored = assets + platforms
+    summary = (
+        f"当前未确认高危事件，建议围绕{'、'.join(monitored[:4])}持续监测。"
+        if monitored
+        else "未确认具体受影响资产、平台或用户群体，当前仅建议持续监测。"
+    )
     return {
-        "affected_assets": [],
-        "affected_platforms": [],
+        "affected_assets": assets,
+        "affected_platforms": platforms,
         "affected_users": [],
-        "impact_channels": ["持续监测", "信息核验"],
-        "impact_summary": "未确认具体受影响资产、平台或用户群体，当前仅建议持续监测。",
-        "uncertainty": ["缺少已成立风险分支，不能推断具体影响对象"],
+        "impact_channels": ["低风险监测", "信息核验"],
+        "impact_summary": summary,
+        "uncertainty": ["缺少已成立风险分支，上述仅为原文监测对象，非确认受影响对象"],
         "source": source,
     }
 

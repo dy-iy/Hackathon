@@ -6,6 +6,8 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.api.auth import router as auth_router
+from app.api.favorites import router as favorites_router
 from app.agents.chat_agent import run_chat_agent, run_chat_agent_with_progress
 from app.api.portfolio import router as portfolio_router
 from app.api.risk_ranking import router as risk_ranking_router
@@ -17,7 +19,10 @@ from app.schemas import (
     RiskAssistantResponse,
     RiskReport,
 )
-from app.services.risk_assistant_service import answer_risk_assistant, stream_risk_assistant_answer
+from app.services.risk_assistant_service import (
+    answer_risk_assistant,
+    stream_risk_assistant_answer,
+)
 
 
 app = FastAPI(title="CryptoRisk Agent Backend")
@@ -42,6 +47,8 @@ app.add_middleware(
 app.include_router(risk_ranking_router)
 app.include_router(sim_router)
 app.include_router(portfolio_router)
+app.include_router(auth_router)
+app.include_router(favorites_router)
 
 
 @app.get("/")
